@@ -116,12 +116,10 @@ export default function Home() {
                 </span>
               </div>
               <h1 className="font-display font-bold tracking-tight text-3xl sm:text-4xl lg:text-5xl mb-3">
-                <span className="text-gradient">Panel de Leads Argentina</span>
+                <span className="text-gradient">Panel de software de ESTUDIO JURIDICO VITA</span>
               </h1>
               <p className="text-text-secondary text-base sm:text-lg leading-relaxed max-w-xl">
-                Centraliza, enriquece y explora tu base de leads argentinos con
-                análisis avanzados, exportaciones y herramientas de scraping
-                integradas.
+                Este es el software creado especificamente para analizar archivos excel, y enviar mensajes automatizados con whatsapp: ESTUDIO JURIDICO VITA
               </p>
             </div>
             <div className="flex flex-col sm:flex-row gap-3 shrink-0">
