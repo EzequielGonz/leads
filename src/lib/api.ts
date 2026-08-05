@@ -1,0 +1,321 @@
+import axios from "axios";
+
+export type LeadTipo = "abogado" | "contador" | "medico" | "empresa" | "sin_clasificar" | "otro";
+
+export interface Lead {
+  id: string;
+  source_file?: string;
+  file_id?: string;
+  raw_data?: Record<string, unknown>;
+  nombre?: string;
+  apellido?: string;
+  full_name?: string;
+  email?: string;
+  telefono?: string;
+  instagram?: string;
+  linkedin?: string;
+  website?: string;
+  ubicacion?: string;
+  es_argentina: boolean;
+  tipo_perfil?: LeadTipo;
+  categorias_detectadas?: string[];
+  biography?: string;
+  follower_count?: number;
+  imported_at: string;
+  [key: string]: unknown;
+}
+
+export interface DashboardStats {
+  total_leads: number;
+  argentina_count: number;
+  por_tipo: Record<string, number>;
+  por_ubicacion: Record<string, number>;
+  emails_count: number;
+  telefonos_count: number;
+  instagram_count: number;
+}
+
+export interface FileImportResult {
+  file_id: string;
+  filename: string;
+  total_rows: number;
+  columns_detected: string[];
+  leads: Lead[];
+  preview_rows: Lead[];
+  sheet_names?: string[];
+}
+
+export interface FileInfo {
+  id: string;
+  filename: string;
+  sheet_name?: string;
+  sheet_names?: string[];
+  total_rows: number;
+  columns_detected: string[];
+  uploaded_at: string;
+}
+
+export interface LeadsQueryParams {
+  search?: string;
+  argentina_only?: boolean | "true" | "1";
+  tipo?: string;
+  ubicacion?: string;
+  page?: number;
+  size?: number;
+  file_id?: string;
+}
+
+export interface LeadsResponse {
+  data: Lead[];
+  total: number;
+  page: number;
+  size: number;
+}
+
+export interface WhatsAppConfig {
+  connected: boolean;
+  phone_number_id: string;
+  business_account_id: string;
+  api_version: string;
+  has_access_token: boolean;
+  has_webhook_verify_token: boolean;
+  access_token_masked: string;
+  webhook_verify_token_masked: string;
+}
+
+export interface WhatsAppStatusResponse {
+  config: WhatsAppConfig;
+  stats: {
+    campaigns_count: number;
+    messages_count: number;
+    inbound_count: number;
+    outbound_count: number;
+    failed_count: number;
+    last_message_at?: string | null;
+    leads_with_phone?: number;
+  };
+  webhook_url: string;
+}
+
+export interface WhatsAppTemplate {
+  name: string;
+  status: string;
+  language?: string;
+  category?: string;
+}
+
+export interface WhatsAppMessage {
+  id: string;
+  campaign_id?: string | null;
+  lead_id?: string | null;
+  lead_name?: string;
+  phone_raw?: string;
+  phone_e164?: string;
+  direction: string;
+  message_type: string;
+  preview?: string;
+  template_name?: string;
+  meta_message_id?: string;
+  status: string;
+  error_message?: string;
+  contact_name?: string;
+  created_at: string;
+}
+
+export interface WhatsAppConversation {
+  conversation_key: string;
+  phone_e164?: string;
+  lead_id?: string | null;
+  lead_name?: string;
+  last_direction?: string;
+  last_status?: string;
+  last_preview?: string;
+  last_message_at?: string;
+  messages_count: number;
+}
+
+export interface WhatsAppCampaignTarget {
+  lead_id?: string;
+  lead_name?: string;
+  phone_raw?: string;
+  phone_e164?: string;
+  status: string;
+  error_message?: string;
+  preview?: string;
+  meta_message_id?: string;
+}
+
+export interface WhatsAppCampaign {
+  id: string;
+  name: string;
+  status: string;
+  message_type: "text" | "template";
+  template_name?: string;
+  template_language?: string;
+  text_body?: string;
+  template_variables?: string[];
+  filters?: Partial<LeadsQueryParams>;
+  created_at: string;
+  targets_total: number;
+  sent_count: number;
+  failed_count: number;
+  targets: WhatsAppCampaignTarget[];
+}
+
+const api = axios.create({
+  baseURL: "/api",
+  timeout: 120000,
+});
+
+api.interceptors.response.use(
+  (response) => response.data,
+  (error) => {
+    const msg = error?.response?.data?.error || error.message || "Error desconocido";
+    console.error("API Error:", msg, error?.response?.data);
+    return Promise.reject(error?.response?.data || { error: msg, status: error?.response?.status || 500 });
+  }
+);
+
+export async function uploadFile(
+  file: File,
+  sheetName?: string
+): Promise<FileImportResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (sheetName) formData.append("sheet_name", sheetName);
+  return api.post("/upload", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+}
+
+export async function getFiles(): Promise<{ files: FileInfo[] }> {
+  return api.get("/files");
+}
+
+export async function getLeads(
+  params: LeadsQueryParams = {}
+): Promise<LeadsResponse> {
+  return api.get("/leads", { params });
+}
+
+export async function getLeadById(id: string): Promise<Lead> {
+  return api.get(`/leads/${id}`);
+}
+
+export async function getDashboardStats(
+  fileId?: string
+): Promise<DashboardStats> {
+  return api.get("/dashboard/stats", { params: fileId ? { file_id: fileId } : {} });
+}
+
+export async function suggestColumns(columns: string[]): Promise<{ mapping: Record<string, string> }> {
+  return api.get("/columns/suggest", { params: { columns: columns.join(",") } });
+}
+
+export async function getWhatsAppStatus(): Promise<WhatsAppStatusResponse> {
+  return api.get("/whatsapp/status");
+}
+
+export async function updateWhatsAppConfig(payload: {
+  access_token?: string;
+  phone_number_id?: string;
+  business_account_id?: string;
+  webhook_verify_token?: string;
+  api_version?: string;
+}): Promise<WhatsAppStatusResponse> {
+  return api.put("/whatsapp/config", payload);
+}
+
+export async function getWhatsAppTemplates(): Promise<{ data: WhatsAppTemplate[] }> {
+  return api.get("/whatsapp/templates");
+}
+
+export async function sendWhatsAppTestMessage(payload: {
+  to: string;
+  message_type: "text" | "template";
+  body?: string;
+  template_name?: string;
+  template_language?: string;
+  template_variables?: string[];
+  preview_url?: boolean;
+}): Promise<{
+  ok: boolean;
+  to: string;
+  preview: string;
+  provider_message_id?: string;
+}> {
+  return api.post("/whatsapp/test-send", payload);
+}
+
+export async function getWhatsAppCampaigns(): Promise<{ data: WhatsAppCampaign[] }> {
+  return api.get("/whatsapp/campaigns");
+}
+
+export async function createWhatsAppCampaign(payload: {
+  name: string;
+  message_type: "text" | "template";
+  text_body?: string;
+  template_name?: string;
+  template_language?: string;
+  template_variables?: string[];
+  filters?: Partial<LeadsQueryParams>;
+}): Promise<WhatsAppCampaign> {
+  return api.post("/whatsapp/campaigns", payload);
+}
+
+export async function getWhatsAppMessages(limit = 50, phone?: string): Promise<{ data: WhatsAppMessage[] }> {
+  return api.get("/whatsapp/messages", {
+    params: { limit, phone },
+  });
+}
+
+export async function getWhatsAppConversations(limit = 30): Promise<{ data: WhatsAppConversation[] }> {
+  return api.get("/whatsapp/conversations", {
+    params: { limit },
+  });
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  if (typeof window === "undefined") return;
+  const url = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+}
+
+export async function exportLeads(
+  format: "xlsx" | "csv" | "json",
+  filters: Partial<LeadsQueryParams> = {}
+): Promise<Blob> {
+  const response = await api.post("/leads/export", {
+    format,
+    filters,
+  }, {
+    responseType: "blob",
+    timeout: 120000,
+  });
+  const blob = response as unknown as Blob;
+  const extByFormat: Record<string, string> = { xlsx: "xlsx", csv: "csv", json: "json" };
+  const mimeByFormat: Record<string, string> = {
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    csv: "text/csv;charset=utf-8;",
+    json: "application/json",
+  };
+  const finalBlob =
+    blob.type && blob.type !== "application/octet-stream"
+      ? blob
+      : new Blob([blob], { type: mimeByFormat[format] ?? blob.type });
+  const ts = new Date().toISOString().slice(0, 10);
+  downloadBlob(finalBlob, `leads_export_${ts}.${extByFormat[format] ?? format}`);
+  return finalBlob;
+}
+
+export default api;
