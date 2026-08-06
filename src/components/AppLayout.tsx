@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   Upload,
@@ -10,8 +10,10 @@ import {
   X,
   ChevronRight,
   Sparkles,
+  LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/store/useAuthStore";
 
 interface NavItem {
   label: string;
@@ -131,9 +133,17 @@ export default function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+  const logout = useAuthStore((s) => s.logout);
+  const currentUser = useAuthStore((s) => s.currentUser);
 
   const currentLabel =
     BREADCRUMB_LABELS[location.pathname] || "Panel de Leads";
+
+  const handleLogout = () => {
+    logout();
+    navigate("/login", { replace: true });
+  };
 
   return (
     <div className="relative min-h-screen flex">
@@ -199,9 +209,17 @@ export default function AppLayout() {
               <div className="flex items-center gap-2 pl-3 border-l border-glass-border/60">
                 <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary to-accent-cyan flex items-center justify-center shadow-soft">
                   <span className="text-sm font-display font-bold text-white">
-                    AR
+                    {currentUser?.charAt(0).toUpperCase()}
                   </span>
                 </div>
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-1.5 text-xs text-text-muted hover:text-red-400 transition-colors px-2 py-1 rounded-md hover:bg-red-500/10"
+                  title="Cerrar sesión"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span className="hidden sm:inline">Salir</span>
+                </button>
               </div>
             </div>
           </div>
