@@ -18,6 +18,9 @@ dist-ssr
 # Datos de ejecucion local (campanas, mensajes y credenciales)
 data/
 
+# Archivos Excel subidos (contienen datos personales de leads)
+uploads/
+
 # Entornos de agentes y cachés de Python
 .freebuff/
 __pycache__/

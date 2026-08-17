@@ -164,10 +164,12 @@ def detect_argentina(row_text):
     if not row_text:
         return False, None
     text = str(row_text).lower()
-    for loc in ARGENTINA_LOCATIONS:
-        if loc in text:
-            return True, loc
-    return False, None
+    matched = [loc for loc in ARGENTINA_LOCATIONS if loc in text]
+    if not matched:
+        return False, None
+    # Preferir coincidencias más específicas que el país (ej. "san juan" antes que "argentina")
+    non_generic = [loc for loc in matched if loc != "argentina"]
+    return True, (non_generic[0] if non_generic else matched[0])
 
 
 def detect_profile_type(row_text):
@@ -189,7 +191,7 @@ def detect_profile_type(row_text):
 def _default_column_mapping(columns):
     mapping = {}
     for col in columns:
-        low = (col or "").lower()
+        low = str(col or "").lower()
         if low in mapping.values():
             continue
         if any(k in low for k in ["correo", "email", "e-mail", "mail"]):
@@ -212,11 +214,140 @@ def _default_column_mapping(columns):
             mapping[col] = "ubicacion"
         elif any(k in low for k in ["bio", "biography", "descripcion", "descripción", "acerca", "about"]):
             mapping[col] = "biography"
+        elif any(k in low for k in ["lesion", "lesión", "diagnostico", "diagnóstico", "patologia", "patología", "afeccion", "afección", "enfermedad", "dolencia", "traumatismo", "herida", "secuela", "motivo"]):
+            mapping[col] = "lesion"
     return mapping
 
 
 def suggest_column_mapping(columns):
     return _default_column_mapping(columns)
+
+
+_NAME_MULTI_RE = re.compile(r"^[A-Za-zÁÉÍÓÚÑÜáéíóúñü' ]{2,60}$")
+_NAME_SINGLE_RE = re.compile(r"^[A-Za-zÁÉÍÓÚÑÜáéíóúñü]{2,30}$")
+_DATE_CELL_RE = re.compile(r"^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$")
+_PHONE_PREFIXES = ("0", "9", "+", "54", "15", "11")
+
+
+def _col_values(records, key):
+    vals = []
+    for r in records:
+        v = r.get(key)
+        if v is None:
+            continue
+        s = str(v).strip()
+        if s:
+            vals.append(s)
+    return vals
+
+
+def _col_is_date(vals):
+    if not vals:
+        return False
+    return sum(1 for v in vals if _DATE_CELL_RE.match(v)) >= len(vals) * 0.7
+
+
+def _col_is_dni(vals):
+    if not vals:
+        return False
+    ok = sum(1 for v in vals if re.fullmatch(r"\d{7,8}", v))
+    return ok >= len(vals) * 0.7
+
+
+def _col_is_phone(vals):
+    if not vals:
+        return False
+    ok = 0
+    for v in vals:
+        digits = re.sub(r"\D", "", v)
+        if not (8 <= len(digits) <= 15):
+            continue
+        # Teléfonos argentinos: prefijos 0/9/+/54/15/11, separadores, o
+        # fijos de 10 dígitos (área + número) aunque el Excel pierda el 0 inicial.
+        if v.startswith(_PHONE_PREFIXES) or len(digits) == 10 or v != digits:
+            ok += 1
+    return ok >= len(vals) * 0.7
+
+
+def _col_is_multiword_name(vals):
+    if not vals:
+        return False
+    ok = sum(1 for v in vals if _NAME_MULTI_RE.match(v) and len(v.split()) >= 2)
+    return ok >= len(vals) * 0.6
+
+
+def _col_is_singleword_name(vals):
+    if not vals:
+        return False
+    ok = sum(1 for v in vals if _NAME_SINGLE_RE.match(v) and len(v.split()) == 1)
+    return ok >= len(vals) * 0.6
+
+
+def _col_is_location(vals):
+    if not vals:
+        return False
+    # No mapear columnas que solo contienen "ARGENTINA" (nacionalidad)
+    specific = [v for v in vals if str(v).strip().lower() != "argentina"]
+    if len(specific) < len(vals) * 0.6:
+        return False
+    ok = sum(1 for v in specific if str(v).strip().lower() in ARGENTINA_LOCATIONS)
+    return ok >= len(vals) * 0.6
+
+
+def guess_column_mapping_by_content(records):
+    """Mapea columnas sin encabezado a partir del contenido de los datos.
+
+    Sirve para archivos cuya primera fila ya es un registro (sin fila de
+    títulos): detecta teléfono, nombre, apellido y ubicación según los
+    valores de cada columna.
+    """
+    if not records:
+        return {}
+    keys = list(records[0].keys())
+    stats = {k: _col_values(records, k) for k in keys}
+
+    mapping = {}
+    for k in keys:
+        vals = stats[k]
+        if _col_is_date(vals):
+            continue
+        if _col_is_dni(vals):
+            continue
+        if _col_is_phone(vals):
+            mapping[k] = "telefono"
+
+    name_cols = []
+    for k in keys:
+        if k in mapping:
+            continue
+        if _col_is_multiword_name(stats[k]):
+            name_cols.append(k)
+
+    if name_cols:
+        nombre_key = name_cols[0]
+        mapping[nombre_key] = "nombre"
+        idx = keys.index(nombre_key)
+        for offset in (-1, 1):
+            j = idx + offset
+            if 0 <= j < len(keys):
+                candidate = keys[j]
+                if candidate not in mapping and _col_is_singleword_name(stats[candidate]):
+                    mapping[candidate] = "apellido"
+                    break
+
+    # Primera columna descriptiva sin asignar -> lesión (diagnóstico/descripción)
+    for k in keys:
+        if k in mapping:
+            continue
+        if _col_is_multiword_name(stats[k]):
+            mapping[k] = "lesion"
+            break
+
+    for k in keys:
+        if k not in mapping and _col_is_location(stats[k]):
+            mapping[k] = "ubicacion"
+
+    return mapping
 
 
 def process_row(raw_row, column_mapping=None):
@@ -237,6 +368,7 @@ def process_row(raw_row, column_mapping=None):
         "linkedin": "",
         "website": "",
         "ubicacion": "",
+        "lesion": "",
         "es_argentina": False,
         "tipo_perfil": None,
         "categorias_detectadas": [],

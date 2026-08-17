@@ -3,6 +3,7 @@ import sys
 import json
 import uuid
 import tempfile
+import traceback
 from datetime import datetime, timezone
 from collections import Counter
 
@@ -16,6 +17,7 @@ from services.excel_processor import read_excel, get_sheet_names
 from services.lead_analyzer import (
     process_row,
     suggest_column_mapping,
+    guess_column_mapping_by_content,
     ARGENTINA_LOCATIONS,
 )
 from services.export_service import (
@@ -60,6 +62,42 @@ CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 leads_store = []
 files_store = []
+
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+LEADS_STORE_PATH = os.path.join(DATA_DIR, "leads_store.json")
+
+
+def _save_store_data():
+    """Persiste leads y archivos en disco para que sobrevivan reinicios."""
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(LEADS_STORE_PATH, "w", encoding="utf-8") as f:
+            json.dump(
+                {"leads": leads_store, "files": files_store},
+                f,
+                ensure_ascii=False,
+            )
+    except Exception:
+        traceback.print_exc()
+
+
+def _load_store_data():
+    global leads_store, files_store
+    try:
+        if not os.path.exists(LEADS_STORE_PATH):
+            return
+        with open(LEADS_STORE_PATH, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        if isinstance(payload, dict):
+            if isinstance(payload.get("leads"), list):
+                leads_store = payload["leads"]
+            if isinstance(payload.get("files"), list):
+                files_store = payload["files"]
+    except Exception:
+        traceback.print_exc()
+
+
+_load_store_data()
 
 
 def _make_json_error(message, status=400):
@@ -158,9 +196,13 @@ def upload_file():
             return _make_json_error("El archivo no contiene filas de datos", 400)
 
         columns = list(rows[0].keys())
+        column_mapping = suggest_column_mapping(columns)
+        if not column_mapping:
+            column_mapping = guess_column_mapping_by_content(rows)
+
         leads = []
         for raw in rows:
-            lead = process_row(raw)
+            lead = process_row(raw, column_mapping)
             lead["source_file"] = original_filename
             lead["file_id"] = file_id
             leads.append(lead)
@@ -177,6 +219,7 @@ def upload_file():
         }
         files_store.insert(0, file_info)
         leads_store.extend(leads)
+        _save_store_data()
 
         preview = leads[:5]
 
@@ -190,6 +233,7 @@ def upload_file():
             "sheet_names": sheet_names,
         })
     except Exception as e:
+        traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
 
@@ -203,6 +247,34 @@ def list_files():
             safe_files.append(sf)
         return jsonify({"files": safe_files})
     except Exception as e:
+        traceback.print_exc()
+        return _make_json_error(f"Error en el servidor: {str(e)}", 500)
+
+
+@app.route("/api/clear-data", methods=["POST"])
+def clear_data():
+    """Borra todos los leads importados, el registro de archivos y los
+    archivos subidos del disco."""
+    try:
+        deleted_leads = len(leads_store)
+        deleted_files = len(files_store)
+        for f in files_store:
+            saved = f.get("saved_path")
+            if saved and os.path.exists(saved):
+                try:
+                    os.remove(saved)
+                except Exception:
+                    pass
+        leads_store.clear()
+        files_store.clear()
+        _save_store_data()
+        return jsonify({
+            "ok": True,
+            "deleted_leads": deleted_leads,
+            "deleted_files": deleted_files,
+        })
+    except Exception as e:
+        traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
 
@@ -239,6 +311,7 @@ def get_leads():
     except ValueError as e:
         return _make_json_error(f"Parámetro inválido: {str(e)}", 400)
     except Exception as e:
+        traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
 
@@ -250,6 +323,7 @@ def get_lead(lead_id):
                 return jsonify(l)
         return _make_json_error(f"Lead no encontrado: {lead_id}", 404)
     except Exception as e:
+        traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
 
@@ -298,6 +372,7 @@ def dashboard_stats():
             "instagram_count": instagram_count,
         })
     except Exception as e:
+        traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
 
@@ -361,6 +436,7 @@ def export_leads():
             except Exception:
                 pass
     except Exception as e:
+        traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
 
@@ -374,6 +450,7 @@ def columns_suggest():
         mapping = suggest_column_mapping(columns)
         return jsonify({"mapping": mapping})
     except Exception as e:
+        traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
 
@@ -387,6 +464,7 @@ def whatsapp_status():
         status["webhook_url"] = f"{request.url_root.rstrip('/')}/api/whatsapp/webhook"
         return jsonify(status)
     except Exception as e:
+        traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
 
@@ -398,6 +476,7 @@ def whatsapp_config():
         status["webhook_url"] = f"{request.url_root.rstrip('/')}/api/whatsapp/webhook"
         return jsonify(status)
     except Exception as e:
+        traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
 
@@ -408,6 +487,7 @@ def whatsapp_templates():
     except WhatsAppServiceError as e:
         return _make_json_error(str(e), 400)
     except Exception as e:
+        traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
 
@@ -420,6 +500,7 @@ def whatsapp_test_send():
     except WhatsAppServiceError as e:
         return _make_json_error(str(e), 400)
     except Exception as e:
+        traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
 
@@ -428,6 +509,7 @@ def whatsapp_campaigns():
     try:
         return jsonify({"data": list_campaigns()})
     except Exception as e:
+        traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
 
@@ -439,6 +521,7 @@ def whatsapp_campaign_by_id(campaign_id):
             return _make_json_error("Campana no encontrada", 404)
         return jsonify(campaign)
     except Exception as e:
+        traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
 
@@ -460,6 +543,7 @@ def whatsapp_create_campaign():
     except WhatsAppServiceError as e:
         return _make_json_error(str(e), 400)
     except Exception as e:
+        traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
 
@@ -480,6 +564,7 @@ def whatsapp_messages():
     except ValueError as e:
         return _make_json_error(f"Parametro invalido: {str(e)}", 400)
     except Exception as e:
+        traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
 
@@ -491,6 +576,7 @@ def whatsapp_conversations():
     except ValueError as e:
         return _make_json_error(f"Parametro invalido: {str(e)}", 400)
     except Exception as e:
+        traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
 
@@ -499,6 +585,7 @@ def whatsapp_bot_status():
     try:
         return jsonify(get_bot_status())
     except Exception as e:
+        traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
 
@@ -508,6 +595,7 @@ def whatsapp_bot_config():
         payload = request.get_json(silent=True) or {}
         return jsonify(update_bot_config(payload))
     except Exception as e:
+        traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
 
@@ -517,6 +605,7 @@ def whatsapp_bot_conversations():
         include_closed = str(request.args.get("include_closed", "1")).lower() not in ("0", "false", "no")
         return jsonify({"data": list_bot_conversations(include_closed=include_closed)})
     except Exception as e:
+        traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
 
@@ -528,6 +617,7 @@ def whatsapp_bot_conversation_detail(phone):
             return _make_json_error("Conversación del bot no encontrada", 404)
         return jsonify(conversation)
     except Exception as e:
+        traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
 
@@ -538,6 +628,7 @@ def whatsapp_bot_run_followups():
     except WhatsAppServiceError as e:
         return _make_json_error(str(e), 400)
     except Exception as e:
+        traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
 

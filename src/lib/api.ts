@@ -16,6 +16,7 @@ export interface Lead {
   linkedin?: string;
   website?: string;
   ubicacion?: string;
+  lesion?: string;
   es_argentina: boolean;
   tipo_perfil?: LeadTipo;
   categorias_detectadas?: string[];
@@ -232,6 +233,14 @@ export async function uploadFile(
 
 export async function getFiles(): Promise<{ files: FileInfo[] }> {
   return api.get("/files");
+}
+
+export async function clearAllData(): Promise<{
+  ok: boolean;
+  deleted_leads: number;
+  deleted_files: number;
+}> {
+  return api.post("/clear-data");
 }
 
 export async function getLeads(

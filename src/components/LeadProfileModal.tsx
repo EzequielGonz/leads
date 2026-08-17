@@ -234,6 +234,7 @@ export default function LeadProfileModal({ open, onClose, lead }: LeadProfileMod
     "linkedin",
     "website",
     "ubicacion",
+    "lesion",
     "es_argentina",
     "tipo_perfil",
     "categorias_detectadas",
@@ -354,6 +355,12 @@ export default function LeadProfileModal({ open, onClose, lead }: LeadProfileMod
                       ? `tel:${String(lead.telefono).replace(/[^+\d]/g, "")}`
                       : undefined
                   }
+                  copyable
+                />
+                <Field
+                  icon={Stethoscope}
+                  label="Lesión"
+                  value={lead.lesion as string}
                   copyable
                 />
                 <Field

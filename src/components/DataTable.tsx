@@ -28,6 +28,8 @@ import {
   Instagram,
   Phone,
   Globe,
+  Activity,
+  Send,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Lead, LeadTipo } from "@/lib/api";
@@ -48,6 +50,7 @@ export interface DataTableProps {
   manualPagination?: boolean;
   loading?: boolean;
   emptyMessage?: string;
+  rowActions?: (lead: Lead) => void;
 }
 
 const TIPO_ICONS: Record<string, React.ElementType> = {
@@ -204,6 +207,24 @@ const DEFAULT_COLUMNS: ColumnDef<Lead>[] = [
     },
   },
   {
+    accessorKey: "lesion",
+    header: "Lesión",
+    size: 200,
+    cell: ({ row }) => {
+      const l = row.original.lesion;
+      return l ? (
+        <div className="flex items-start gap-1.5 min-w-0">
+          <Activity className="w-3.5 h-3.5 text-red-400/80 mt-0.5 shrink-0" />
+          <span className="truncate text-sm text-text-secondary" title={l}>
+            {l}
+          </span>
+        </div>
+      ) : (
+        <span className="text-text-muted/50 text-xs italic">—</span>
+      );
+    },
+  },
+  {
     accessorKey: "instagram",
     header: "Instagram",
     size: 160,
@@ -345,6 +366,7 @@ export default function DataTable({
   manualPagination = false,
   loading = false,
   emptyMessage = "No hay leads para mostrar.",
+  rowActions,
 }: DataTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -369,7 +391,46 @@ export default function DataTable({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialPageSize]);
 
-  const columns = useMemo(() => (customColumns ?? DEFAULT_COLUMNS), [customColumns]);
+  const columns = useMemo(() => {
+    const base = customColumns ?? DEFAULT_COLUMNS;
+    if (!rowActions) return base;
+    const actionsColumn: ColumnDef<Lead> = {
+      id: "acciones",
+      header: "Enviar",
+      size: 84,
+      enableSorting: false,
+      cell: ({ row }) => {
+        const lead = row.original;
+        return (
+          <button
+            type="button"
+            disabled={!lead.telefono}
+            onClick={(e) => {
+              e.stopPropagation();
+              rowActions(lead);
+            }}
+            title={
+              lead.telefono
+                ? `Enviar mensaje a ${lead.telefono}`
+                : "Sin teléfono"
+            }
+            className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/25 text-cyan-200 hover:bg-cyan-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Send className="w-3 h-3" />
+            Enviar
+          </button>
+        );
+      },
+    };
+    const copy = [...base];
+    const telIndex = base.findIndex(
+      (c) =>
+        (c as { accessorKey?: string }).accessorKey === "telefono" ||
+        c.id === "telefono"
+    );
+    copy.splice(telIndex === -1 ? copy.length : telIndex + 1, 0, actionsColumn);
+    return copy;
+  }, [customColumns, rowActions]);
 
   const table = useReactTable({
     data,

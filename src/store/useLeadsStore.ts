@@ -18,6 +18,7 @@ interface LeadsState {
   setRecentFiles: (files: FileInfo[]) => void;
   prependRecentFile: (file: FileInfo) => void;
   bumpDataVersion: () => void;
+  clearAll: () => void;
   dashboardCache?: DashboardStats;
   setDashboardCache: (stats?: DashboardStats) => void;
 }
@@ -77,6 +78,18 @@ export const useLeadsStore = create<LeadsState>((set) => ({
     })),
 
   bumpDataVersion: () => set({ lastImportTimestamp: Date.now(), dashboardCache: undefined }),
+
+  clearAll: () =>
+    set({
+      leads: [],
+      selectedLead: null,
+      currentFileId: null,
+      total: 0,
+      recentFiles: [],
+      dashboardCache: undefined,
+      lastImportTimestamp: Date.now(),
+      filters: { ...defaultFilters },
+    }),
 
   setDashboardCache: (stats) => set({ dashboardCache: stats }),
 }));
