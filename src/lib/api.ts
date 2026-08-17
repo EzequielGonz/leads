@@ -154,12 +154,54 @@ export interface WhatsAppCampaign {
   template_language?: string;
   text_body?: string;
   template_variables?: string[];
+  use_bot_first_message?: boolean;
   filters?: Partial<LeadsQueryParams>;
   created_at: string;
   targets_total: number;
   sent_count: number;
   failed_count: number;
   targets: WhatsAppCampaignTarget[];
+}
+
+export interface WhatsAppBotConfig {
+  bot_enabled: boolean;
+  bot_study_name: string;
+  bot_advisor_name: string;
+  bot_consultation_policy: string;
+  bot_legal_name: string;
+  bot_verification_channel: string;
+  bot_slot_1: string;
+  bot_slot_2: string;
+}
+
+export interface WhatsAppBotStatusResponse {
+  config: WhatsAppBotConfig;
+  stats: {
+    total: number;
+    active: number;
+    closed: number;
+    transferred: number;
+    scheduled: number;
+    opted_out: number;
+    high_priority: number;
+  };
+  first_message: string;
+}
+
+export interface WhatsAppBotConversation {
+  phone_e164?: string;
+  lead_name?: string;
+  stage?: string;
+  closed: boolean;
+  close_reason: string;
+  priority: string;
+  appointment_set: boolean;
+  followups_sent: number;
+  replies_count: number;
+  created_at?: string;
+  updated_at?: string;
+  closed_at?: string | null;
+  summary?: Record<string, string> | null;
 }
 
 const api = axios.create({
@@ -258,6 +300,7 @@ export async function createWhatsAppCampaign(payload: {
   template_name?: string;
   template_language?: string;
   template_variables?: string[];
+  use_bot_first_message?: boolean;
   filters?: Partial<LeadsQueryParams>;
 }): Promise<WhatsAppCampaign> {
   return api.post("/whatsapp/campaigns", payload);
@@ -273,6 +316,28 @@ export async function getWhatsAppConversations(limit = 30): Promise<{ data: What
   return api.get("/whatsapp/conversations", {
     params: { limit },
   });
+}
+
+export async function getWhatsAppBotStatus(): Promise<WhatsAppBotStatusResponse> {
+  return api.get("/whatsapp/bot");
+}
+
+export async function updateWhatsAppBotConfig(
+  payload: Partial<WhatsAppBotConfig>
+): Promise<WhatsAppBotStatusResponse> {
+  return api.put("/whatsapp/bot", payload);
+}
+
+export async function getWhatsAppBotConversations(
+  includeClosed = true
+): Promise<{ data: WhatsAppBotConversation[] }> {
+  return api.get("/whatsapp/bot/conversations", {
+    params: { include_closed: includeClosed ? "1" : "0" },
+  });
+}
+
+export async function runWhatsAppBotFollowups(): Promise<{ sent: number }> {
+  return api.post("/whatsapp/bot/followups/run");
 }
 
 function downloadBlob(blob: Blob, filename: string) {

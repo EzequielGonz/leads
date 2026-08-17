@@ -16,14 +16,19 @@ import {
   createWhatsAppCampaign,
   getFiles,
   getLeads,
+  getWhatsAppBotConversations,
+  getWhatsAppBotStatus,
   getWhatsAppCampaigns,
   getWhatsAppConversations,
   getWhatsAppMessages,
   getWhatsAppStatus,
   getWhatsAppTemplates,
+  runWhatsAppBotFollowups,
   sendWhatsAppTestMessage,
+  updateWhatsAppBotConfig,
   updateWhatsAppConfig,
   type LeadsQueryParams,
+  type WhatsAppBotConversation,
 } from "@/lib/api";
 
 function formatDate(iso?: string | null) {
@@ -52,6 +57,60 @@ function parseVariables(raw: string) {
     .split(/\r?\n|,/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+const STAGE_LABELS: Record<string, string> = {
+  awaiting_status: "Esperando respuesta al primer mensaje",
+  awaiting_authorization: "Pidiendo autorización",
+  awaiting_resolved_detail: "Consulta por caso resuelto",
+  q0: "Verificación de emergencia",
+  q1: "Fecha del accidente",
+  q2: "Circunstancia del accidente",
+  q3: "Relación laboral",
+  q4: "Descripción del accidente",
+  q5: "Lesión informada",
+  q6: "Atención médica",
+  q7: "Denuncia ante la ART",
+  q8: "Estado del tratamiento",
+  q9: "Salud actual",
+  q10: "Situación laboral actual",
+  q11: "Documentación",
+  q12: "Ubicación",
+  q13: "Representación profesional",
+  awaiting_emergency_offer: "Emergencia: ofreciendo derivación",
+  awaiting_optout_confirm: "Confirmando baja",
+  awaiting_schedule_offer: "Ofreciendo coordinación",
+  awaiting_postpone_choice: "Decisión de postergar",
+  awaiting_priority_offer: "Ofreciendo comunicación prioritaria",
+  awaiting_close_or_info: "Cierre o información general",
+  awaiting_art_rechazo_detail: "Revisando rechazo de ART",
+  scheduling_modality: "Eligiendo modalidad",
+  scheduling_slot: "Eligiendo horario",
+  scheduled: "Turno agendado",
+  transferred: "Derivada a profesional",
+  closed: "Cerrada",
+};
+
+function stageLabel(stage?: string) {
+  if (!stage) return "-";
+  return STAGE_LABELS[stage] || stage;
+}
+
+function botCloseLabel(conv: WhatsAppBotConversation) {
+  if (!conv.closed) return conv.appointment_set ? "Turno agendado" : "En curso";
+  const reasons: Record<string, string> = {
+    baja: "Baja solicitada",
+    no_reconoce_consulta: "No reconoce la consulta",
+    no_interesado: "No interesado",
+    no_autorizo: "No autorizó continuar",
+    resuelto: "Caso resuelto",
+    ya_tiene_abogado: "Ya tiene abogado",
+    informacion_general: "Solo información general",
+    postergado: "Postergó decisión",
+    rechazo_derivacion: "Rechazó derivación",
+    prioridad_declinada: "Declinó prioridad",
+  };
+  return reasons[conv.close_reason] || conv.close_reason || "Cerrada";
 }
 
 const TIPO_OPTIONS = [
@@ -94,12 +153,27 @@ export default function WhatsAppPage() {
     template_name: "",
     template_language: "es_AR",
     template_variables: "{{full_name}}",
+    use_bot_first_message: false,
     search: "",
     argentina_only: true,
     tipo: "",
     ubicacion: "",
     file_id: "",
   });
+
+  const [botForm, setBotForm] = React.useState({
+    bot_enabled: false,
+    bot_study_name: "",
+    bot_advisor_name: "",
+    bot_consultation_policy: "",
+    bot_legal_name: "",
+    bot_verification_channel: "",
+    bot_slot_1: "",
+    bot_slot_2: "",
+  });
+  const [botInitialized, setBotInitialized] = React.useState(false);
+  const [isSavingBot, setIsSavingBot] = React.useState(false);
+  const [isRunningFollowups, setIsRunningFollowups] = React.useState(false);
 
   const statusQuery = useQuery({
     queryKey: ["whatsapp-status"],
@@ -141,6 +215,18 @@ export default function WhatsAppPage() {
     staleTime: 5_000,
   });
 
+  const botStatusQuery = useQuery({
+    queryKey: ["whatsapp-bot"],
+    queryFn: getWhatsAppBotStatus,
+    staleTime: 5_000,
+  });
+
+  const botConversationsQuery = useQuery({
+    queryKey: ["whatsapp-bot-conversations"],
+    queryFn: () => getWhatsAppBotConversations(false),
+    staleTime: 5_000,
+  });
+
   const previewFilters = React.useMemo<LeadsQueryParams>(
     () => ({
       page: 1,
@@ -174,8 +260,27 @@ export default function WhatsAppPage() {
       messagesQuery.refetch(),
       conversationsQuery.refetch(),
       leadsPreviewQuery.refetch(),
+      botStatusQuery.refetch(),
+      botConversationsQuery.refetch(),
     ]);
-  }, [campaignsQuery, conversationsQuery, leadsPreviewQuery, messagesQuery, statusQuery, templatesQuery]);
+  }, [botConversationsQuery, botStatusQuery, campaignsQuery, conversationsQuery, leadsPreviewQuery, messagesQuery, statusQuery, templatesQuery]);
+
+  React.useEffect(() => {
+    const bot = botStatusQuery.data;
+    if (!bot || botInitialized) return;
+    setBotForm((prev) => ({
+      ...prev,
+      bot_enabled: Boolean(bot.config.bot_enabled),
+      bot_study_name: bot.config.bot_study_name || "",
+      bot_advisor_name: bot.config.bot_advisor_name || "",
+      bot_consultation_policy: bot.config.bot_consultation_policy || "",
+      bot_legal_name: bot.config.bot_legal_name || "",
+      bot_verification_channel: bot.config.bot_verification_channel || "",
+      bot_slot_1: bot.config.bot_slot_1 || "",
+      bot_slot_2: bot.config.bot_slot_2 || "",
+    }));
+    setBotInitialized(true);
+  }, [botStatusQuery.data, botInitialized]);
 
   React.useEffect(() => {
     const status = statusQuery.data;
@@ -203,6 +308,91 @@ export default function WhatsAppPage() {
         : { ...prev, template_name: templates[0]?.name || prev.template_name }
     );
   }, [templatesQuery.data]);
+
+  async function handleSaveBot(event: React.FormEvent) {
+    event.preventDefault();
+    setIsSavingBot(true);
+    try {
+      await updateWhatsAppBotConfig(botForm);
+      success(
+        "Bot actualizado",
+        "La configuración del asistente de orientación quedó guardada."
+      );
+      await botStatusQuery.refetch();
+    } catch (err) {
+      error("No se pudo guardar la configuración del bot", getErrorMessage(err));
+    } finally {
+      setIsSavingBot(false);
+    }
+  }
+
+  async function copyToClipboard(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    }
+  }
+
+  function buildTemplateBody() {
+    return (
+      "Hola {{1}}, ¿cómo estás? Soy {{2}}, del equipo de {{3}}.\n\n" +
+      "Te escribo por una consulta que realizaste anteriormente relacionada con un accidente " +
+      "laboral. Muchas personas desconocen que, dependiendo del accidente, el tratamiento y las " +
+      "posibles secuelas, podrían tener derecho a realizar un reclamo.\n\n" +
+      "¿Tu caso todavía está pendiente o ya pudiste resolverlo?"
+    );
+  }
+
+  function buildTemplateVariables() {
+    const advisor = botForm.bot_advisor_name.trim() || "[Nombre del asesor]";
+    const study = botForm.bot_study_name.trim() || "[Nombre del estudio]";
+    return `{{full_name}}\n${advisor}\n${study}`;
+  }
+
+  async function handleCopyTemplate() {
+    const ok = await copyToClipboard(buildTemplateBody());
+    if (ok) {
+      success(
+        "Cuerpo copiado",
+        "Pegalo en el Cuerpo de la plantilla en WhatsApp Manager, con idioma Español (Argentina)."
+      );
+    } else {
+      error("No se pudo copiar", "Copiá el texto manualmente desde el preview.");
+    }
+  }
+
+  async function handleCopyTemplateVariables() {
+    const ok = await copyToClipboard(buildTemplateVariables());
+    if (ok) {
+      success(
+        "Variables copiadas",
+        "Pegalas en 'Variables por línea o separadas por coma' al crear la campaña."
+      );
+    } else {
+      error("No se pudo copiar", "Copiá las variables manualmente.");
+    }
+  }
+
+  async function handleRunFollowups() {
+    setIsRunningFollowups(true);
+    try {
+      const result = await runWhatsAppBotFollowups();
+      info("Seguimientos", `Se despacharon ${result.sent} seguimientos vencidos.`);
+      await Promise.all([botStatusQuery.refetch(), botConversationsQuery.refetch()]);
+    } catch (err) {
+      error("No se pudieron enviar los seguimientos", getErrorMessage(err));
+    } finally {
+      setIsRunningFollowups(false);
+    }
+  }
 
   const files = filesQuery.data?.files ?? [];
   const campaigns = campaignsQuery.data?.data ?? [];
@@ -284,6 +474,7 @@ export default function WhatsAppPage() {
         template_name: campaignForm.template_name,
         template_language: campaignForm.template_language,
         template_variables: parseVariables(campaignForm.template_variables),
+        use_bot_first_message: campaignForm.use_bot_first_message,
         filters,
       });
 
@@ -522,6 +713,255 @@ export default function WhatsAppPage() {
         </div>
       </section>
 
+      <section className="glass-card gradient-border-top p-6 overflow-hidden">
+        <div className="mb-5 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div>
+            <h2 className="section-title text-xl sm:text-2xl flex items-center gap-2">
+              <Bot className="w-5 h-5 text-cyan-300" />
+              Bot de orientación laboral
+            </h2>
+            <p className="section-subtitle">
+              Asistente que responde automáticamente a los contactos por accidentes laborales:
+              verifica el estado del caso, hace preguntas breves, detecta urgencias, agenda
+              entrevistas y respeta cada solicitud de baja.
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+            <button
+              type="button"
+              onClick={() => void handleRunFollowups()}
+              className="btn-secondary text-sm px-4 py-3 shrink-0"
+              disabled={isRunningFollowups}
+            >
+              <Send className="w-4 h-4" />
+              {isRunningFollowups ? "Enviando..." : "Enviar seguimientos"}
+            </button>
+            <label className="flex items-center gap-2 rounded-2xl bg-white/5 border border-white/10 px-4 py-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={botForm.bot_enabled}
+                onChange={(e) => setBotForm((prev) => ({ ...prev, bot_enabled: e.target.checked }))}
+                className="w-4 h-4 accent-cyan-500"
+              />
+              <span className="text-sm text-text-secondary">Bot activo</span>
+            </label>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
+          {[
+            { label: "Conversaciones", value: botStatusQuery.data?.stats.total ?? 0 },
+            { label: "Activas", value: botStatusQuery.data?.stats.active ?? 0 },
+            { label: "Turnos agendados", value: botStatusQuery.data?.stats.scheduled ?? 0 },
+            { label: "Prioridad alta", value: botStatusQuery.data?.stats.high_priority ?? 0 },
+            { label: "Bajas", value: botStatusQuery.data?.stats.opted_out ?? 0 },
+            { label: "Derivadas", value: botStatusQuery.data?.stats.transferred ?? 0 },
+          ].map((item) => (
+            <div key={item.label} className="rounded-2xl bg-white/5 border border-white/10 p-4">
+              <div className="text-xs uppercase tracking-wider text-text-muted mb-1">{item.label}</div>
+              <div className="text-xl font-display font-bold text-text-primary">{item.value}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-[1.15fr_0.85fr] gap-6">
+          <form onSubmit={handleSaveBot} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium text-text-secondary mb-2 block">
+                  Nombre del estudio
+                </label>
+                <input
+                  value={botForm.bot_study_name}
+                  onChange={(e) => setBotForm((prev) => ({ ...prev, bot_study_name: e.target.value }))}
+                  className="input-field"
+                  placeholder="Estudio Jurídico ..."
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-text-secondary mb-2 block">
+                  Nombre del asesor
+                </label>
+                <input
+                  value={botForm.bot_advisor_name}
+                  onChange={(e) => setBotForm((prev) => ({ ...prev, bot_advisor_name: e.target.value }))}
+                  className="input-field"
+                  placeholder="Laura"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-text-secondary mb-2 block">
+                  Política de la consulta inicial
+                </label>
+                <input
+                  value={botForm.bot_consultation_policy}
+                  onChange={(e) =>
+                    setBotForm((prev) => ({ ...prev, bot_consultation_policy: e.target.value }))
+                  }
+                  className="input-field"
+                  placeholder="gratuita / tiene un costo de $... / el costo debe confirmarlo el profesional"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-text-secondary mb-2 block">
+                  Nombre legal del estudio
+                </label>
+                <input
+                  value={botForm.bot_legal_name}
+                  onChange={(e) => setBotForm((prev) => ({ ...prev, bot_legal_name: e.target.value }))}
+                  className="input-field"
+                  placeholder="Para la respuesta ante '¿es una estafa?'"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-text-secondary mb-2 block">
+                  Medio de verificación
+                </label>
+                <input
+                  value={botForm.bot_verification_channel}
+                  onChange={(e) =>
+                    setBotForm((prev) => ({ ...prev, bot_verification_channel: e.target.value }))
+                  }
+                  className="input-field"
+                  placeholder="nuestra web oficial / nuestras redes"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-text-secondary mb-2 block">
+                  Horario 1 disponible
+                </label>
+                <input
+                  value={botForm.bot_slot_1}
+                  onChange={(e) => setBotForm((prev) => ({ ...prev, bot_slot_1: e.target.value }))}
+                  className="input-field"
+                  placeholder="lunes 10:00"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-text-secondary mb-2 block">
+                  Horario 2 disponible
+                </label>
+                <input
+                  value={botForm.bot_slot_2}
+                  onChange={(e) => setBotForm((prev) => ({ ...prev, bot_slot_2: e.target.value }))}
+                  className="input-field"
+                  placeholder="jueves 15:30"
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-text-muted leading-relaxed">
+                El bot responde las respuestas entrantes dentro de la ventana de 24 horas que abre
+                el primer mensaje de cada campaña.
+              </p>
+              <button
+                type="submit"
+                className="btn-primary px-5 py-3 shrink-0 disabled:opacity-50"
+                disabled={isSavingBot}
+              >
+                <Bot className="w-4 h-4" />
+                {isSavingBot ? "Guardando..." : "Guardar bot"}
+              </button>
+            </div>
+          </form>
+
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <div className="text-xs uppercase tracking-wider text-text-muted">
+                Primer mensaje (preview)
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleCopyTemplate()}
+                  className="text-xs px-2 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/25 text-cyan-100 hover:bg-cyan-500/20"
+                >
+                  Copiar para plantilla
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleCopyTemplateVariables()}
+                  className="text-xs px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-text-secondary hover:bg-white/10"
+                >
+                  Copiar variables
+                </button>
+              </div>
+            </div>
+            <p className="text-sm text-text-secondary whitespace-pre-line leading-relaxed max-h-72 overflow-y-auto">
+              {botStatusQuery.data?.first_message ||
+                "Configurá el bot para ver el mensaje inicial."}
+            </p>
+            <p className="text-xs text-text-muted mt-3 leading-relaxed">
+              "Copiar para plantilla" genera el cuerpo con las variables {"{{1}}"}, {"{{2}}"} y {"{{3}}"}
+              para pegar en WhatsApp Manager (idioma Español Argentina). "Copiar variables" copia
+              los valores que van en la campaña: nombre del lead, asesor y estudio.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section className="glass-card gradient-border-top p-6 overflow-hidden">
+        <div className="mb-4">
+          <h2 className="section-title text-xl sm:text-2xl flex items-center gap-2">
+            <MessagesSquare className="w-5 h-5 text-fuchsia-300" />
+            Conversaciones del bot
+          </h2>
+          <p className="section-subtitle">
+            Estado de cada contacto dentro del flujo de orientación, con la prioridad asignada
+            y el motivo de cierre.
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="table">
+            <thead>
+              <tr>
+                <th className="text-left">Contacto</th>
+                <th className="text-left">Etapa</th>
+                <th className="text-left">Prioridad</th>
+                <th className="text-left">Estado</th>
+                <th className="text-left">Actualizado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(botConversationsQuery.data?.data ?? []).length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="text-center text-text-muted py-8">
+                    Aun no hay conversaciones del bot.
+                  </td>
+                </tr>
+              ) : (
+                (botConversationsQuery.data?.data ?? []).map((conv, index) => (
+                  <tr key={conv.phone_e164 || `bot-conv-${index}`}>
+                    <td>
+                      <div className="font-medium text-text-primary">
+                        {conv.lead_name || conv.phone_e164 || "-"}
+                      </div>
+                      <div className="text-xs text-text-muted">{conv.phone_e164 || ""}</div>
+                    </td>
+                    <td className="text-sm">{stageLabel(conv.stage)}</td>
+                    <td>
+                      <span
+                        className={`badge ${
+                          conv.priority === "Alta"
+                            ? "badge-empresa"
+                            : conv.priority === "Media"
+                              ? "badge-argentina"
+                              : "badge-persona"
+                        }`}
+                      >
+                        {conv.priority || "-"}
+                      </span>
+                    </td>
+                    <td className="text-sm">{botCloseLabel(conv)}</td>
+                    <td className="text-sm text-text-muted">{formatDate(conv.updated_at)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section className="grid grid-cols-1 xl:grid-cols-[0.9fr_1.1fr] gap-6">
         <form onSubmit={handleTestSend} className="glass-card gradient-border-top p-6">
           <div className="mb-5">
@@ -749,6 +1189,30 @@ export default function WhatsAppPage() {
                 <option value="template">Plantilla</option>
                 <option value="text">Texto libre</option>
               </select>
+            </div>
+
+            <div className="flex items-center gap-3 rounded-2xl bg-white/5 border border-white/10 px-4 py-3">
+              <input
+                id="bot-first-message"
+                type="checkbox"
+                checked={campaignForm.use_bot_first_message}
+                onChange={(e) =>
+                  setCampaignForm((prev) => ({
+                    ...prev,
+                    use_bot_first_message: e.target.checked,
+                  }))
+                }
+                className="w-4 h-4 accent-cyan-500"
+              />
+              <div>
+                <label htmlFor="bot-first-message" className="text-sm text-text-secondary">
+                  Usar el primer mensaje del bot (accidentes laborales)
+                </label>
+                <p className="text-xs text-text-muted mt-0.5">
+                  Reemplaza el texto por el mensaje inicial del asistente; las respuestas las
+                  gestiona el bot si está activo.
+                </p>
+              </div>
             </div>
 
             {campaignForm.message_type === "template" ? (

@@ -12,6 +12,17 @@ dist
 dist-ssr
 *.local
 
+# Secrets
+.env
+
+# Datos de ejecucion local (campanas, mensajes y credenciales)
+data/
+
+# Entornos de agentes y cachés de Python
+.freebuff/
+__pycache__/
+*.pyc
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

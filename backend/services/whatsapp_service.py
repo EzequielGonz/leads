@@ -8,6 +8,18 @@ from datetime import datetime, timezone
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
+from services.bot_service import (
+    DEFAULT_BOT_CONFIG,
+    build_first_message,
+    ensure_conversation as bot_ensure_conversation,
+    get_bot_config as bot_get_config,
+    get_bot_conversation as bot_get_conversation,
+    handle_inbound as bot_handle_inbound,
+    list_bot_conversations as bot_list_conversations,
+    bot_stats as bot_stats,
+    run_due_followups as bot_due_followups,
+)
+
 
 GRAPH_BASE_URL = "https://graph.facebook.com"
 PLACEHOLDER_REGEX = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
@@ -43,6 +55,7 @@ def _default_store():
         "campaigns": [],
         "messages": [],
         "events": [],
+        "bot_conversations": {},
     }
 
 
@@ -119,6 +132,7 @@ def get_status():
     outbound = sum(1 for item in messages if item.get("direction") == "outbound")
     failed = sum(1 for item in messages if item.get("status") == "failed")
     last_message_at = messages[-1]["created_at"] if messages else None
+    bot_cfg = bot_get_config(store)
     return {
         "config": _public_config(config),
         "stats": {
@@ -128,6 +142,10 @@ def get_status():
             "outbound_count": outbound,
             "failed_count": failed,
             "last_message_at": last_message_at,
+        },
+        "bot": {
+            "enabled": bot_cfg.get("bot_enabled"),
+            "stats": bot_stats(store),
         },
     }
 
@@ -139,6 +157,14 @@ def update_config(payload):
         "business_account_id",
         "webhook_verify_token",
         "api_version",
+        "bot_enabled",
+        "bot_study_name",
+        "bot_advisor_name",
+        "bot_consultation_policy",
+        "bot_legal_name",
+        "bot_verification_channel",
+        "bot_slot_1",
+        "bot_slot_2",
     }
 
     def _apply(store):
@@ -481,8 +507,9 @@ def fetch_templates():
 
 
 def create_campaign(leads, payload):
-    config = _ensure_configured()
-    del config
+    _ensure_configured()
+    bot_config = bot_get_config(_read_store())
+    use_bot_first_message = bool(payload.get("use_bot_first_message"))
 
     candidates = [lead for lead in (leads or []) if lead.get("telefono")]
     if not candidates:
@@ -490,6 +517,8 @@ def create_campaign(leads, payload):
 
     name = (payload.get("name") or "").strip() or f"Campana {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     message_type = (payload.get("message_type") or "template").strip().lower()
+    if use_bot_first_message:
+        message_type = "text"
     text_body = str(payload.get("text_body") or "").strip()
     template_name = str(payload.get("template_name") or "").strip()
     template_language = str(payload.get("template_language") or "es_AR").strip()
@@ -498,7 +527,7 @@ def create_campaign(leads, payload):
 
     if message_type == "template" and not template_name:
         raise WhatsAppServiceError("Debes indicar una plantilla para la campana.")
-    if message_type == "text" and not text_body:
+    if message_type == "text" and not text_body and not use_bot_first_message:
         raise WhatsAppServiceError("Debes indicar el texto del mensaje para la campana.")
 
     campaign = {
@@ -510,6 +539,7 @@ def create_campaign(leads, payload):
         "template_language": template_language,
         "text_body": text_body,
         "template_variables": template_variables,
+        "use_bot_first_message": use_bot_first_message,
         "filters": filters,
         "created_at": _utc_now(),
         "targets_total": len(candidates),
@@ -545,7 +575,10 @@ def create_campaign(leads, payload):
                     rendered_vars,
                 )
             else:
-                rendered_text = _render_text_template(text_body, lead)
+                if use_bot_first_message:
+                    rendered_text = build_first_message(lead, bot_config)
+                else:
+                    rendered_text = _render_text_template(text_body, lead)
                 preview = rendered_text
                 response = send_text_message(normalized_phone, rendered_text)
 
@@ -587,6 +620,14 @@ def create_campaign(leads, payload):
         _append_campaign(store, campaign)
         for message in outbound_records:
             _append_message_record(store, message)
+        for target in campaign["targets"]:
+            bot_ensure_conversation(
+                store,
+                phone_e164=target.get("phone_e164") or "",
+                phone_raw=target.get("phone_raw") or "",
+                lead_id=target.get("lead_id"),
+                lead_name=target.get("lead_name") or "",
+            )
         _record_event(
             store,
             "campaign_completed",
@@ -632,6 +673,7 @@ def process_webhook(payload, leads):
     results = {
         "messages_received": 0,
         "statuses_received": 0,
+        "bot_replies_sent": 0,
     }
 
     def _apply(store):
@@ -701,8 +743,118 @@ def process_webhook(payload, leads):
                     )
                     results["messages_received"] += 1
 
+                    # Respuesta automática del bot de orientación, si está activo.
+                    bot_cfg = bot_get_config(store)
+                    if bot_cfg.get("bot_enabled"):
+                        conv = (store.get("bot_conversations") or {}).get(phone_e164)
+                        if conv and not conv.get("closed"):
+                            inbound_text = (
+                                message.get("text", {}).get("body")
+                                if message.get("type") == "text"
+                                else None
+                            )
+                            try:
+                                replies = bot_handle_inbound(conv, inbound_text, bot_cfg, lead or None)
+                            except Exception:
+                                replies = []
+                            for body in replies:
+                                try:
+                                    send_text_message(phone_e164, body)
+                                    status = "accepted"
+                                    error_message = ""
+                                except Exception as exc:
+                                    status = "failed"
+                                    error_message = str(exc)
+                                _append_message_record(
+                                    store,
+                                    _build_outbound_record(
+                                        lead=lead,
+                                        campaign_id=None,
+                                        phone_raw=raw_from,
+                                        phone_e164=phone_e164,
+                                        message_type="text",
+                                        preview=body,
+                                        status=status,
+                                        error_message=error_message,
+                                    ),
+                                )
+                                results["bot_replies_sent"] = results.get("bot_replies_sent", 0) + 1
+
         _record_event(store, "webhook_received", results)
         return results
+
+    return _mutate_store(_apply)
+
+
+def _bot_status_from_store(store):
+    config = bot_get_config(store)
+    return {
+        "config": config,
+        "stats": bot_stats(store),
+        "first_message": build_first_message(None, config),
+    }
+
+
+def get_bot_status():
+    return _bot_status_from_store(_read_store())
+
+
+def update_bot_config(payload):
+    allowed = set(DEFAULT_BOT_CONFIG.keys())
+
+    def _apply(store):
+        config = store.setdefault("config", {})
+        for key, value in (payload or {}).items():
+            if key not in allowed:
+                continue
+            config[key] = str(value or "").strip()
+        return _bot_status_from_store(store)
+
+    return _mutate_store(_apply)
+
+
+def list_bot_conversations(include_closed=True):
+    return bot_list_conversations(_read_store(), include_closed=include_closed)
+
+
+def get_bot_conversation(phone):
+    normalized = normalize_phone_for_whatsapp(phone)
+    return bot_get_conversation(_read_store(), normalized)
+
+
+def run_bot_followups():
+    def _apply(store):
+        pending = bot_due_followups(store)
+        sent = 0
+        for conv, phone, body in pending:
+            pseudo_lead = {
+                "id": conv.get("lead_id"),
+                "full_name": conv.get("lead_name") or "",
+                "nombre": "",
+            }
+            try:
+                send_text_message(phone, body)
+                status = "accepted"
+                error_message = ""
+            except Exception as exc:
+                status = "failed"
+                error_message = str(exc)
+            _append_message_record(
+                store,
+                _build_outbound_record(
+                    lead=pseudo_lead,
+                    campaign_id=None,
+                    phone_raw=phone,
+                    phone_e164=phone,
+                    message_type="text",
+                    preview=body,
+                    status=status,
+                    error_message=error_message,
+                ),
+            )
+            sent += 1
+        _record_event(store, "bot_followups_run", {"sent": sent})
+        return {"sent": sent}
 
     return _mutate_store(_apply)
 

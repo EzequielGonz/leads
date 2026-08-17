@@ -7,6 +7,7 @@ import Home from "@/pages/Home";
 import UploadPage from "@/pages/UploadPage";
 import ExplorerPage from "@/pages/ExplorerPage";
 import AnalysisPage from "@/pages/AnalysisPage";
+import WhatsAppPage from "@/pages/WhatsAppPage";
 import ScraperPage from "@/pages/ScraperPage";
 import { useAuthStore } from "@/store/useAuthStore";
 
@@ -35,11 +36,12 @@ export default function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route element={<RequireAuth />}>
               <Route element={<AppLayout />}>
-                <Route path="/" element={<Home />} />
-                <Route path="/upload" element={<UploadPage />} />
-                <Route path="/explorer" element={<ExplorerPage />} />
-                <Route path="/analysis" element={<AnalysisPage />} />
-                <Route path="/scraper" element={<ScraperPage />} />
+              <Route path="/" element={<Home />} />
+              <Route path="/upload" element={<UploadPage />} />
+              <Route path="/explorer" element={<ExplorerPage />} />
+              <Route path="/analysis" element={<AnalysisPage />} />
+              <Route path="/whatsapp" element={<WhatsAppPage />} />
+              <Route path="/scraper" element={<ScraperPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>
             </Route>

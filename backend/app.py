@@ -27,14 +27,19 @@ from services.whatsapp_service import (
     WhatsAppServiceError,
     create_campaign,
     fetch_templates,
+    get_bot_conversation,
+    get_bot_status,
     get_campaign,
     get_status as get_whatsapp_status,
     get_webhook_verify_token,
+    list_bot_conversations,
     list_campaigns,
     list_conversations,
     list_messages,
     process_webhook,
+    run_bot_followups,
     send_test_message,
+    update_bot_config,
     update_config as update_whatsapp_config,
 )
 
@@ -485,6 +490,53 @@ def whatsapp_conversations():
         return jsonify({"data": list_conversations(limit=limit)})
     except ValueError as e:
         return _make_json_error(f"Parametro invalido: {str(e)}", 400)
+    except Exception as e:
+        return _make_json_error(f"Error en el servidor: {str(e)}", 500)
+
+
+@app.route("/api/whatsapp/bot", methods=["GET"])
+def whatsapp_bot_status():
+    try:
+        return jsonify(get_bot_status())
+    except Exception as e:
+        return _make_json_error(f"Error en el servidor: {str(e)}", 500)
+
+
+@app.route("/api/whatsapp/bot", methods=["PUT"])
+def whatsapp_bot_config():
+    try:
+        payload = request.get_json(silent=True) or {}
+        return jsonify(update_bot_config(payload))
+    except Exception as e:
+        return _make_json_error(f"Error en el servidor: {str(e)}", 500)
+
+
+@app.route("/api/whatsapp/bot/conversations", methods=["GET"])
+def whatsapp_bot_conversations():
+    try:
+        include_closed = str(request.args.get("include_closed", "1")).lower() not in ("0", "false", "no")
+        return jsonify({"data": list_bot_conversations(include_closed=include_closed)})
+    except Exception as e:
+        return _make_json_error(f"Error en el servidor: {str(e)}", 500)
+
+
+@app.route("/api/whatsapp/bot/conversations/<phone>", methods=["GET"])
+def whatsapp_bot_conversation_detail(phone):
+    try:
+        conversation = get_bot_conversation(phone)
+        if not conversation:
+            return _make_json_error("Conversación del bot no encontrada", 404)
+        return jsonify(conversation)
+    except Exception as e:
+        return _make_json_error(f"Error en el servidor: {str(e)}", 500)
+
+
+@app.route("/api/whatsapp/bot/followups/run", methods=["POST"])
+def whatsapp_bot_run_followups():
+    try:
+        return jsonify(run_bot_followups())
+    except WhatsAppServiceError as e:
+        return _make_json_error(str(e), 400)
     except Exception as e:
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
 
