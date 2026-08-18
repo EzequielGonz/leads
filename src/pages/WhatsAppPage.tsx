@@ -174,6 +174,9 @@ export default function WhatsAppPage() {
   const [botInitialized, setBotInitialized] = React.useState(false);
   const [isSavingBot, setIsSavingBot] = React.useState(false);
   const [isRunningFollowups, setIsRunningFollowups] = React.useState(false);
+  const [replyTarget, setReplyTarget] = React.useState<string | null>(null);
+  const [replyText, setReplyText] = React.useState("");
+  const [isReplying, setIsReplying] = React.useState(false);
 
   const statusQuery = useQuery({
     queryKey: ["whatsapp-status"],
@@ -391,6 +394,26 @@ export default function WhatsAppPage() {
       error("No se pudieron enviar los seguimientos", getErrorMessage(err));
     } finally {
       setIsRunningFollowups(false);
+    }
+  }
+
+  async function handleSendReply(phone: string) {
+    if (!replyText.trim() || !phone) return;
+    setIsReplying(true);
+    try {
+      await sendWhatsAppTestMessage({
+        to: phone,
+        message_type: "text",
+        body: replyText.trim(),
+      });
+      success("Mensaje enviado", `Respuesta enviada a ${phone}.`);
+      setReplyText("");
+      setReplyTarget(null);
+      messagesQuery.refetch();
+    } catch (err) {
+      error("No se pudo enviar", getErrorMessage(err));
+    } finally {
+      setIsReplying(false);
     }
   }
 
@@ -1376,6 +1399,48 @@ export default function WhatsAppPage() {
                   <div className="mt-3 text-xs text-text-muted">
                     {conversation.messages_count} mensajes · ultimo estado {conversation.last_status || "-"}
                   </div>
+                  {conversation.phone_e164 && (
+                    <div className="mt-3">
+                      {replyTarget === conversation.conversation_key ? (
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            className="input flex-1"
+                            placeholder="Escribi tu respuesta..."
+                            value={replyText}
+                            onChange={(e) => setReplyText(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && !isReplying) {
+                                handleSendReply(conversation.phone_e164!);
+                              }
+                            }}
+                            autoFocus
+                          />
+                          <button
+                            className="btn btn-primary"
+                            disabled={isReplying || !replyText.trim()}
+                            onClick={() => handleSendReply(conversation.phone_e164!)}
+                          >
+                            {isReplying ? "Enviando..." : "Enviar"}
+                          </button>
+                          <button
+                            className="btn btn-ghost"
+                            onClick={() => { setReplyTarget(null); setReplyText(""); }}
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          className="btn btn-ghost text-sm text-fuchsia-300 hover:text-fuchsia-200"
+                          onClick={() => setReplyTarget(conversation.conversation_key)}
+                        >
+                          <Send className="w-3 h-3 inline mr-1" />
+                          Responder
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))
             )}
