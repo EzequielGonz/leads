@@ -265,9 +265,13 @@ export default function ExplorerPage() {
 
   const openSendModal = (lead: Lead) => {
     setSendTarget(lead);
+    const leadName = (lead.full_name || "").trim();
+    const leadLesion = (lead.lesion || "").trim();
     setSendForm((prev) => ({
       ...prev,
-      template_name: prev.template_name || "",
+      template_name: prev.template_name || sendTemplates[0]?.name || "",
+      template_variables: [leadName || "[Nombre del lead]", "[Nombre del asesor]", "[Nombre del estudio]"].join("\n"),
+      body: `Hola ${leadName || "[Nombre]"}, te escribimos desde Estudio Juridico Vita.${leadLesion ? ` Vimos tu consulta sobre: ${leadLesion}.` : ""}`,
     }));
   };
 
