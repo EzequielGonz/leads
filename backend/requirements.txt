@@ -5,4 +5,5 @@ openpyxl>=3.1
 python-dotenv>=1.0
 chardet>=5.0
 xlrd>=2.0
-instagrapi>=1.100.0
+gunicorn>=21.0
+requests>=2.31
