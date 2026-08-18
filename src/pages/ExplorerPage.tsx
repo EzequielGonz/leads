@@ -138,7 +138,7 @@ export default function ExplorerPage() {
     body: "Hola {{full_name}}, te escribimos desde Estudio Juridico Vita.",
     template_name: "",
     template_language: "es_AR",
-    template_variables: "{{full_name}}\n[Nombre del asesor]\n[Nombre del estudio]",
+    template_variables: `{{full_name}}\n[Nombre del asesor]\n[Nombre del estudio]`,
   });
   const { success, info, error } = useToast();
 

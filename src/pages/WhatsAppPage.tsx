@@ -142,7 +142,7 @@ export default function WhatsAppPage() {
     body: "Hola {{full_name}}, te escribimos desde Leads AR para continuar la conversacion.",
     template_name: "",
     template_language: "es_AR",
-    template_variables: "{{full_name}}",
+    template_variables: `{{full_name}}\n[Nombre del asesor]\n[Nombre del estudio]`,
   });
 
   const [campaignForm, setCampaignForm] = React.useState({
@@ -152,7 +152,7 @@ export default function WhatsAppPage() {
       "Hola {{full_name}}, vimos tu perfil y queremos contarte una propuesta. Respondeme por este medio si te interesa.",
     template_name: "",
     template_language: "es_AR",
-    template_variables: "{{full_name}}",
+    template_variables: `{{full_name}}\n[Nombre del asesor]\n[Nombre del estudio]`,
     use_bot_first_message: false,
     search: "",
     argentina_only: true,
