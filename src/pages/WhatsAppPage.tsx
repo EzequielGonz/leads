@@ -191,12 +191,10 @@ export default function WhatsAppPage() {
   });
 
   const templatesQuery = useQuery({
-    queryKey: ["whatsapp-templates", statusQuery.data?.config.business_account_id],
+    queryKey: ["whatsapp-templates"],
     queryFn: getWhatsAppTemplates,
-    enabled:
-      Boolean(statusQuery.data?.config.connected) &&
-      Boolean(statusQuery.data?.config.business_account_id),
-    retry: false,
+    enabled: statusQuery.isSuccess,
+    retry: 2,
     staleTime: 30_000,
   });
 
