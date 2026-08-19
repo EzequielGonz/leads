@@ -12,6 +12,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
+from services.database import (
+    save_leads, load_leads, delete_all_leads,
+    save_files, load_files, delete_all_files,
+    export_all, import_all, delete_all,
+)
 
 from services.excel_processor import read_excel, get_sheet_names
 from services.lead_analyzer import (
@@ -60,39 +65,25 @@ app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 
-leads_store = []
-files_store = []
+# ---------------------------------------------------------------------------
+# Almacenamiento SQLite (persistente)
+# ---------------------------------------------------------------------------
 
-DATA_DIR = os.path.join(PROJECT_ROOT, "data")
-LEADS_STORE_PATH = os.path.join(DATA_DIR, "leads_store.json")
-
-
-def _save_store_data():
-    """Persiste leads y archivos en disco para que sobrevivan reinicios."""
+def _load_store_data():
+    """Carga datos desde SQLite al arrancar."""
+    global leads_store, files_store
     try:
-        os.makedirs(DATA_DIR, exist_ok=True)
-        with open(LEADS_STORE_PATH, "w", encoding="utf-8") as f:
-            json.dump(
-                {"leads": leads_store, "files": files_store},
-                f,
-                ensure_ascii=False,
-            )
+        leads_store = load_leads()
+        files_store = load_files()
     except Exception:
         traceback.print_exc()
 
 
-def _load_store_data():
-    global leads_store, files_store
+def _save_store_data():
+    """Guarda leads y archivos en SQLite."""
     try:
-        if not os.path.exists(LEADS_STORE_PATH):
-            return
-        with open(LEADS_STORE_PATH, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-        if isinstance(payload, dict):
-            if isinstance(payload.get("leads"), list):
-                leads_store = payload["leads"]
-            if isinstance(payload.get("files"), list):
-                files_store = payload["files"]
+        save_leads(leads_store)
+        save_files(files_store)
     except Exception:
         traceback.print_exc()
 
@@ -272,6 +263,39 @@ def clear_data():
             "ok": True,
             "deleted_leads": deleted_leads,
             "deleted_files": deleted_files,
+        })
+    except Exception as e:
+        traceback.print_exc()
+        return _make_json_error(f"Error en el servidor: {str(e)}", 500)
+
+
+@app.route("/api/data/export", methods=["GET"])
+def export_data():
+    """Exporta todos los leads y archivos como JSON descargable."""
+    try:
+        data = export_all()
+        return jsonify(data)
+    except Exception as e:
+        traceback.print_exc()
+        return _make_json_error(f"Error en el servidor: {str(e)}", 500)
+
+
+@app.route("/api/data/import", methods=["POST"])
+def import_data():
+    """Importa leads y archivos desde un JSON."""
+    try:
+        payload = request.get_json(silent=True) or {}
+        if not payload.get("leads") and not payload.get("files"):
+            return _make_json_error("No se enviaron datos para importar.", 400)
+        import_all(payload)
+        # Recargar en memoria
+        global leads_store, files_store
+        leads_store = load_leads()
+        files_store = load_files()
+        return jsonify({
+            "ok": True,
+            "imported_leads": len(leads_store),
+            "imported_files": len(files_store),
         })
     except Exception as e:
         traceback.print_exc()

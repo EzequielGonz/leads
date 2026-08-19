@@ -254,6 +254,21 @@ export async function clearAllData(): Promise<{
   return api.post("/clear-data");
 }
 
+export async function exportData(): Promise<{
+  leads: Lead[];
+  files: FileInfo[];
+  exported_at: string;
+}> {
+  return api.get("/data/export");
+}
+
+export async function importData(payload: {
+  leads?: Lead[];
+  files?: FileInfo[];
+}): Promise<{ ok: boolean; imported_leads: number; imported_files: number }> {
+  return api.post("/data/import", payload);
+}
+
 export async function getLeads(
   params: LeadsQueryParams = {}
 ): Promise<LeadsResponse> {

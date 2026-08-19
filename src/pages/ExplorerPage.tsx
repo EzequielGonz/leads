@@ -3,6 +3,7 @@ import {
   Search,
   Filter,
   Download,
+  Upload,
   MapPin,
   SlidersHorizontal,
   RefreshCw,
@@ -27,10 +28,12 @@ import { useToast } from "@/components/Toast";
 import useLeadsStore from "@/store/useLeadsStore";
 import {
   clearAllData,
+  exportData,
   exportLeads,
   getFiles,
   getLeads,
   getWhatsAppTemplates,
+  importData,
   sendWhatsAppTestMessage,
   type FileInfo,
   type Lead,
@@ -259,6 +262,56 @@ export default function ExplorerPage() {
     }
   };
 
+  const handleExportData = async () => {
+    try {
+      const data = await exportData();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `leads_backup_${new Date().toISOString().split("T")[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      success(
+        "Datos exportados",
+        `Se exportaron ${data.leads.length} leads y ${data.files.length} archivo(s).`
+      );
+    } catch (e) {
+      error(
+        "No se pudieron exportar los datos",
+        e instanceof Error ? e.message : "Intente nuevamente."
+      );
+    }
+  };
+
+  const handleImportData = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    event.target.value = "";
+
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!data.leads && !data.files) {
+        error("Formato inválido", "El archivo no contiene datos de leads o archivos.");
+        return;
+      }
+      const res = await importData(data);
+      success(
+        "Datos importados",
+        `Se importaron ${res.imported_leads} leads y ${res.imported_files} archivo(s). Recargando...`
+      );
+      // Recargar todo
+      await filesQuery.refetch();
+      await fileLeadsQuery.refetch();
+    } catch (e) {
+      error(
+        "No se pudieron importar los datos",
+        e instanceof Error ? e.message : "El archivo puede estar corrupto."
+      );
+    }
+  };
+
   const toggleFile = (fileId: string) => {
     setExpanded((prev) => ({ ...prev, [fileId]: !prev[fileId] }));
   };
@@ -353,6 +406,28 @@ export default function ExplorerPage() {
               />
               Refrescar
             </button>
+            <button
+              onClick={() => void handleExportData()}
+              disabled={totalCount === 0}
+              className="text-xs py-1.5 px-3 rounded-xl bg-green-500/10 border border-green-500/25 text-green-300 hover:bg-green-500/20 transition-colors inline-flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Exportar datos a archivo JSON"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Exportar
+            </button>
+            <label
+              className="text-xs py-1.5 px-3 rounded-xl bg-blue-500/10 border border-blue-500/25 text-blue-300 hover:bg-blue-500/20 transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+              title="Importar datos desde archivo JSON"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              Importar
+              <input
+                type="file"
+                accept=".json"
+                className="hidden"
+                onChange={handleImportData}
+              />
+            </label>
             <button
               onClick={() => void handleClearAll()}
               disabled={deleting || totalCount === 0}
