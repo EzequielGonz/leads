@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import type { Lead, LeadsQueryParams, FileInfo, DashboardStats } from "@/lib/api";
 
 interface LeadsState {
@@ -33,14 +34,16 @@ const defaultFilters: LeadsQueryParams = {
   file_id: undefined,
 };
 
-export const useLeadsStore = create<LeadsState>((set) => ({
-  leads: [],
-  selectedLead: null,
-  currentFileId: null,
-  total: 0,
-  filters: { ...defaultFilters },
-  recentFiles: [],
-  lastImportTimestamp: 0,
+export const useLeadsStore = create<LeadsState>()(
+  persist(
+    (set) => ({
+      leads: [],
+      selectedLead: null,
+      currentFileId: null,
+      total: 0,
+      filters: { ...defaultFilters },
+      recentFiles: [],
+      lastImportTimestamp: 0,
 
   setLeads: (leads, total) =>
     set((state) => ({
@@ -92,6 +95,18 @@ export const useLeadsStore = create<LeadsState>((set) => ({
     }),
 
   setDashboardCache: (stats) => set({ dashboardCache: stats }),
-}));
+    }),
+    {
+      name: "leads-storage",
+      partialize: (state) => ({
+        leads: state.leads,
+        total: state.total,
+        recentFiles: state.recentFiles,
+        lastImportTimestamp: state.lastImportTimestamp,
+        filters: state.filters,
+      }),
+    }
+  )
+);
 
 export default useLeadsStore;

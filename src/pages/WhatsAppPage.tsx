@@ -12,6 +12,7 @@ import {
   Bot,
 } from "lucide-react";
 import { useToast } from "@/components/Toast";
+import { useNotificationSound } from "@/hooks/useNotificationSound";
 import {
   createWhatsAppCampaign,
   getFiles,
@@ -209,6 +210,9 @@ export default function WhatsAppPage() {
     queryFn: () => getWhatsAppMessages(20),
     staleTime: 5_000,
   });
+
+  const messagesCount = messagesQuery.data?.data?.length ?? 0;
+  useNotificationSound(messagesCount);
 
   const conversationsQuery = useQuery({
     queryKey: ["whatsapp-conversations"],
