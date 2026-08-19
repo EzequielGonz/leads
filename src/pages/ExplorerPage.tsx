@@ -294,6 +294,8 @@ export default function ExplorerPage() {
           .split(/\r?\n|,/)
           .map((s) => s.trim())
           .filter(Boolean),
+        lead_name: sendTarget.full_name || sendTarget.nombre || "",
+        lead_id: sendTarget.id || "",
       });
       success(
         "Mensaje enviado",

@@ -300,6 +300,8 @@ export async function sendWhatsAppTestMessage(payload: {
   template_language?: string;
   template_variables?: string[];
   preview_url?: boolean;
+  lead_name?: string;
+  lead_id?: string;
 }): Promise<{
   ok: boolean;
   to: string;

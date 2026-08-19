@@ -11,9 +11,11 @@ from urllib import request as urllib_request
 from services.bot_service import (
     DEFAULT_BOT_CONFIG,
     build_first_message,
+    build_menu_message as bot_build_menu_message,
     ensure_conversation as bot_ensure_conversation,
     get_bot_config as bot_get_config,
     get_bot_conversation as bot_get_conversation,
+    get_menu_config as bot_get_menu_config,
     handle_inbound as bot_handle_inbound,
     list_bot_conversations as bot_list_conversations,
     bot_stats as bot_stats,
@@ -461,6 +463,9 @@ def send_template_message(to_phone, template_name, language_code, body_variables
 def send_test_message(payload):
     message_type = (payload.get("message_type") or "text").strip().lower()
     to_phone = payload.get("to") or ""
+    lead_name = payload.get("lead_name") or ""
+    lead_id = payload.get("lead_id") or ""
+
     if message_type == "template":
         template_name = (payload.get("template_name") or "").strip()
         language_code = (payload.get("template_language") or "es_AR").strip()
@@ -468,6 +473,10 @@ def send_test_message(payload):
         result = send_template_message(to_phone, template_name, language_code, body_variables)
         preview = f"Plantilla {template_name}"
         provider_id = ((result.get("messages") or [{}])[0]).get("id") or ""
+
+        # Después de enviar el template, si el bot menú está activo, enviar el menú automáticamente
+        _send_bot_menu_after_template(to_phone, lead_name, lead_id)
+
         return {
             "ok": True,
             "to": normalize_phone_for_whatsapp(to_phone),
@@ -486,6 +495,36 @@ def send_test_message(payload):
         "provider_message_id": provider_id,
         "response": result,
     }
+
+
+def _send_bot_menu_after_template(to_phone, lead_name="", lead_id=""):
+    """Si el bot menú está activo, crea la conversación y envía el menú después de un template."""
+    def _apply(store):
+        bot_cfg = bot_get_config(store)
+        if not bot_cfg.get("bot_enabled"):
+            return
+        menu_cfg = bot_get_menu_config(bot_cfg)
+        if not menu_cfg.get("enabled"):
+            return
+
+        phone_e164 = normalize_phone_for_whatsapp(to_phone)
+        conv = bot_ensure_conversation(
+            store,
+            phone_e164=phone_e164,
+            phone_raw=to_phone,
+            lead_id=lead_id,
+            lead_name=lead_name,
+        )
+
+        # Construir y enviar el menú
+        menu_msg = bot_build_menu_message(lead_name or "", bot_cfg)
+        if menu_msg:
+            send_text_message(to_phone, menu_msg)
+            # Marcar que el menú fue enviado
+            conv.setdefault("data", {})["menu_sent"] = True
+            conv["updated_at"] = _utc_now()
+
+    _mutate_store(_apply)
 
 
 def fetch_templates():
@@ -573,6 +612,12 @@ def create_campaign(leads, payload):
                     template_name,
                     template_language,
                     rendered_vars,
+                )
+                # Después del template, enviar menú si el bot está activo
+                _send_bot_menu_after_template(
+                    normalized_phone,
+                    lead.get("full_name") or lead.get("nombre") or "",
+                    lead.get("id") or "",
                 )
             else:
                 if use_bot_first_message:
@@ -748,6 +793,31 @@ def process_webhook(payload, leads):
                     if bot_cfg.get("bot_enabled"):
                         conv = (store.get("bot_conversations") or {}).get(phone_e164)
                         if conv and not conv.get("closed"):
+                            menu_cfg = bot_get_menu_config(bot_cfg)
+                            # Si el menú está activo y no se envió aún, enviarlo primero
+                            if menu_cfg.get("enabled") and not conv.get("data", {}).get("menu_sent"):
+                                menu_msg = bot_build_menu_message(conv.get("lead_name") or "", bot_cfg)
+                                if menu_msg:
+                                    try:
+                                        send_text_message(phone_e164, menu_msg)
+                                        conv.setdefault("data", {})["menu_sent"] = True
+                                        conv["updated_at"] = _utc_now()
+                                        _append_message_record(
+                                            store,
+                                            _build_outbound_record(
+                                                lead=lead,
+                                                campaign_id=None,
+                                                phone_raw=raw_from,
+                                                phone_e164=phone_e164,
+                                                message_type="text",
+                                                preview=menu_msg[:100],
+                                                status="accepted",
+                                            ),
+                                        )
+                                        results["bot_replies_sent"] = results.get("bot_replies_sent", 0) + 1
+                                    except Exception:
+                                        pass
+
                             inbound_text = (
                                 message.get("text", {}).get("body")
                                 if message.get("type") == "text"
