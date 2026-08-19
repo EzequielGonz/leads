@@ -112,11 +112,10 @@ def build_menu_message(nombre, config):
     if not menu["enabled"]:
         return None
     
-    # Intro por defecto mejorada
+    # Intro por defecto - sin saludo (el saludo ya va en la plantilla)
     intro = menu["intro"]
     if not intro:
         intro = (
-            f"Hola {nombre}. 👋\n\n"
             f"Para poder derivarte con el profesional adecuado según tu situación, "
             f"necesitamos hacerte algunas preguntas breves. No te preocupes, "
             f"son solo para entender mejor tu caso y brindarte la mejor atención.\n\n"

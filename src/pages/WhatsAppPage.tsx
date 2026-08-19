@@ -1001,7 +1001,7 @@ export default function WhatsAppPage() {
                     <p className="text-xs text-cyan-200">
                       <strong>Vista previa del menú:</strong><br /><br />
                       {botForm.bot_menu_intro || (
-                        <>Hola [nombre]. 👋<br /><br />Para poder derivarte con el profesional adecuado según tu situación, necesitamos hacerte algunas preguntas breves. No te preocupes, son solo para entender mejor tu caso y brindarte la mejor atención.<br /><br />Responde con el número de cada opción:<br /><br /></>
+                        <>Para poder derivarte con el profesional adecuado según tu situación, necesitamos hacerte algunas preguntas breves. No te preocupes, son solo para entender mejor tu caso y brindarte la mejor atención.<br /><br />Responde con el número de cada opción:<br /><br /></>
                       )}
                       {botForm.bot_menu_questions.map((q, idx) => (
                         <span key={q.id}>
