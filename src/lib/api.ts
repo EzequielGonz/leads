@@ -173,6 +173,15 @@ export interface WhatsAppBotConfig {
   bot_verification_channel: string;
   bot_slot_1: string;
   bot_slot_2: string;
+  bot_menu_enabled: boolean;
+  bot_menu_intro: string;
+  bot_menu_questions: Array<{
+    id: string;
+    question: string;
+    options: Array<{ value: string; label: string }>;
+    free_text?: boolean;
+    required?: boolean;
+  }>;
 }
 
 export interface WhatsAppBotStatusResponse {

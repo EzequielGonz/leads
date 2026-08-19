@@ -171,6 +171,42 @@ export default function WhatsAppPage() {
     bot_verification_channel: "",
     bot_slot_1: "",
     bot_slot_2: "",
+    bot_menu_enabled: false,
+    bot_menu_intro: "",
+    bot_menu_questions: [
+      {
+        id: "antiguedad",
+        question: "¿Cuánto tiempo de antiguedad tiene tu caso?",
+        options: [
+          { value: "1", label: "Menos de 1 año" },
+          { value: "2", label: "De 1 a 5 años" },
+          { value: "3", label: "Más de 5 años" },
+        ],
+      },
+      {
+        id: "lugar",
+        question: "¿Dónde ocurrió el accidente?",
+        options: [
+          { value: "1", label: "En el trabajo" },
+          { value: "2", label: "En el camino al trabajo" },
+          { value: "3", label: "Volviendo del trabajo" },
+        ],
+      },
+      {
+        id: "horario",
+        question: "📅 ¿Qué día y horario te viene bien para una reunión?",
+        options: [],
+        free_text: true,
+        required: true,
+      },
+      {
+        id: "lesion",
+        question: "🩺 ¿Qué lesión o problema de salud te generó el accidente?",
+        options: [],
+        free_text: true,
+        required: true,
+      },
+    ],
   });
   const [botInitialized, setBotInitialized] = React.useState(false);
   const [isSavingBot, setIsSavingBot] = React.useState(false);
@@ -873,6 +909,113 @@ export default function WhatsAppPage() {
                   placeholder="jueves 15:30"
                 />
               </div>
+            </div>
+
+            {/* Menú Numérico */}
+            <div className="border-t border-white/10 pt-4 mt-4">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-sm font-medium text-text-primary">Menú Numérico</h3>
+                  <p className="text-xs text-text-muted">
+                    Respuestas automáticas con números (1, 2, 3...)
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={botForm.bot_menu_enabled}
+                    onChange={(e) => setBotForm((prev) => ({ ...prev, bot_menu_enabled: e.target.checked }))}
+                    className="w-4 h-4 accent-cyan-500"
+                  />
+                  <span className="text-sm text-text-secondary">Activar</span>
+                </label>
+              </div>
+
+              {botForm.bot_menu_enabled && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium text-text-secondary mb-2 block">
+                      Mensaje de bienvenida del menú
+                    </label>
+                    <textarea
+                      value={botForm.bot_menu_intro}
+                      onChange={(e) => setBotForm((prev) => ({ ...prev, bot_menu_intro: e.target.value }))}
+                      className="input-field h-20"
+                      placeholder="Hola, para poder brindarte la mejor atención, necesitamos hacerte algunas preguntas."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium text-text-secondary mb-2 block">
+                      Preguntas del menú
+                    </label>
+                    <div className="space-y-3">
+                      {botForm.bot_menu_questions.map((q, idx) => (
+                        <div key={q.id} className="rounded-lg bg-white/5 border border-white/10 p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-medium text-cyan-400">
+                              Pregunta {idx + 1}{q.required && " *"}
+                            </span>
+                            <span className="text-xs text-text-muted">{q.id}</span>
+                          </div>
+                          <input
+                            value={q.question}
+                            onChange={(e) => {
+                              const newQuestions = [...botForm.bot_menu_questions];
+                              newQuestions[idx] = { ...q, question: e.target.value };
+                              setBotForm((prev) => ({ ...prev, bot_menu_questions: newQuestions }));
+                            }}
+                            className="input-field w-full text-sm"
+                            placeholder="Pregunta..."
+                          />
+                          {q.options && q.options.length > 0 && (
+                            <div className="mt-2 space-y-1">
+                              {q.options.map((opt, optIdx) => (
+                                <div key={optIdx} className="flex items-center gap-2">
+                                  <span className="text-xs text-cyan-400 w-4">{opt.value}</span>
+                                  <input
+                                    value={opt.label}
+                                    onChange={(e) => {
+                                      const newQuestions = [...botForm.bot_menu_questions];
+                                      const newOptions = [...q.options];
+                                      newOptions[optIdx] = { ...opt, label: e.target.value };
+                                      newQuestions[idx] = { ...q, options: newOptions };
+                                      setBotForm((prev) => ({ ...prev, bot_menu_questions: newQuestions }));
+                                    }}
+                                    className="input-field flex-1 text-sm"
+                                    placeholder="Opción..."
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {q.free_text && (
+                            <p className="text-xs text-text-muted mt-2 italic">Respuesta de texto libre</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg bg-cyan-500/10 border border-cyan-500/25 p-3">
+                    <p className="text-xs text-cyan-200">
+                      <strong>Vista previa del menú:</strong><br />
+                      {botForm.bot_menu_intro && <>{botForm.bot_menu_intro}<br /><br /></>}
+                      {botForm.bot_menu_questions.map((q, idx) => (
+                        <span key={q.id}>
+                          📋 {q.question}<br />
+                          {q.options && q.options.map((opt) => (
+                            <span key={opt.value}>{opt.value} - {opt.label}<br /></span>
+                          ))}
+                          {!q.free_text && q.options?.length === 0 && "(Opciones)\n"}
+                          {q.free_text && "(Escribí tu respuesta)\n"}
+                          <br />
+                        </span>
+                      ))}
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="flex items-center justify-between gap-3">
               <p className="text-xs text-text-muted leading-relaxed">

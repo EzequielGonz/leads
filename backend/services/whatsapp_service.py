@@ -807,7 +807,14 @@ def update_bot_config(payload):
         for key, value in (payload or {}).items():
             if key not in allowed:
                 continue
-            config[key] = str(value or "").strip()
+            # Para preguntas del menú, guardar como JSON (lista de objetos)
+            if key == "bot_menu_questions" and isinstance(value, list):
+                config[key] = value
+            elif key == "bot_menu_enabled":
+                # Guardar como booleano
+                config[key] = value
+            else:
+                config[key] = str(value or "").strip()
         return _bot_status_from_store(store)
 
     return _mutate_store(_apply)

@@ -35,7 +35,47 @@ DEFAULT_BOT_CONFIG = {
     "bot_verification_channel": "",
     "bot_slot_1": "",
     "bot_slot_2": "",
+    # Menú numérico
+    "bot_menu_enabled": False,
+    "bot_menu_intro": "",
+    "bot_menu_questions": [],
 }
+
+# Preguntas por defecto del menú numérico
+DEFAULT_MENU_QUESTIONS = [
+    {
+        "id": "antiguedad",
+        "question": "¿Cuánto tiempo de antiguedad tiene tu caso?",
+        "options": [
+            {"value": "1", "label": "Menos de 1 año"},
+            {"value": "2", "label": "De 1 a 5 años"},
+            {"value": "3", "label": "Más de 5 años"}
+        ]
+    },
+    {
+        "id": "lugar",
+        "question": "¿Dónde ocurrió el accidente?",
+        "options": [
+            {"value": "1", "label": "En el trabajo"},
+            {"value": "2", "label": "En el camino al trabajo"},
+            {"value": "3", "label": "Volviendo del trabajo"}
+        ]
+    },
+    {
+        "id": "horario",
+        "question": "📅 ¿Qué día y horario te viene bien para una reunión?",
+        "options": [],
+        "free_text": True,
+        "required": True
+    },
+    {
+        "id": "lesion",
+        "question": "🩺 ¿Qué lesión o problema de salud te generó el accidente?",
+        "options": [],
+        "free_text": True,
+        "required": True
+    }
+]
 
 _ENV_MAP = {
     "bot_enabled": "WHATSAPP_BOT_ENABLED",
@@ -46,7 +86,54 @@ _ENV_MAP = {
     "bot_verification_channel": "WHATSAPP_BOT_VERIFICATION_CHANNEL",
     "bot_slot_1": "WHATSAPP_BOT_SLOT_1",
     "bot_slot_2": "WHATSAPP_BOT_SLOT_2",
+    "bot_menu_enabled": "WHATSAPP_BOT_MENU_ENABLED",
+    "bot_menu_intro": "WHATSAPP_BOT_MENU_INTRO",
 }
+
+
+def get_menu_config(config):
+    """Obtiene la configuración del menú numérico."""
+    menu_enabled = str(config.get("bot_menu_enabled")).strip().lower() in (
+        "1", "true", "yes", "si", "sí", "on",
+    )
+    intro = str(config.get("bot_menu_intro") or "").strip()
+    questions = config.get("bot_menu_questions") or DEFAULT_MENU_QUESTIONS
+    
+    return {
+        "enabled": menu_enabled,
+        "intro": intro,
+        "questions": questions
+    }
+
+
+def build_menu_message(nombre, config):
+    """Construye el mensaje del menú numérico."""
+    menu = get_menu_config(config)
+    if not menu["enabled"]:
+        return None
+    
+    intro = menu["intro"] or f"Hola {nombre}, para poder brindarte la mejor atención, necesitamos hacerte algunas preguntas."
+    
+    lines = [intro, ""]
+    
+    for i, q in enumerate(menu["questions"], 1):
+        lines.append(f"📋 {q['question']}")
+        if q.get("options"):
+            for opt in q["options"]:
+                lines.append(f"{opt['value']} - {opt['label']}")
+        else:
+            lines.append("(Escribí tu respuesta)")
+        lines.append("")
+    
+    lines.append("Empecemos con la primera pregunta:")
+    lines.append("")
+    lines.append(f"1️⃣ {menu['questions'][0]['question']}")
+    
+    if menu["questions"][0].get("options"):
+        for opt in menu["questions"][0]["options"]:
+            lines.append(f"{opt['value']} - {opt['label']}")
+    
+    return "\n".join(lines)
 
 
 def get_bot_config(store=None):
@@ -1062,6 +1149,12 @@ def handle_inbound(conv, raw_text, config, lead=None):
 
     stage = conv.get("stage")
 
+    # ============ MODO MENÚ NUMÉRICO ============
+    menu_config = get_menu_config(config)
+    if menu_config["enabled"] and stage not in ("transferred", "scheduled"):
+        return _handle_menu_flow(conv, text, config, lead, menu_config)
+    # ============================================
+
     if stage == "transferred":
         return [MSG_YA_DERIVADO]
 
@@ -1106,3 +1199,91 @@ def handle_inbound(conv, raw_text, config, lead=None):
         _transfer(conv)
         return [MSG_DERIVAR_SIN_INFO]
     return [MSG_NO_ENTIENDO]
+
+
+# ---------------------------------------------------------------------------
+# Procesamiento del menú numérico
+# ---------------------------------------------------------------------------
+
+def _handle_menu_flow(conv, text, config, lead, menu_config):
+    """Maneja el flujo del menú numérico."""
+    d = conv.setdefault("data", {})
+    questions = menu_config["questions"]
+    
+    # Si es la primera vez, enviar el menú completo
+    if conv.get("stage") == "awaiting_status" or conv.get("stage") == "menu_start":
+        _set_stage(conv, "menu_q1")
+        d["menu_current_question"] = 0
+        return [build_menu_message(conv.get("lead_name") or "", config)]
+    
+    # Obtener la pregunta actual
+    current_idx = d.get("menu_current_question", 0)
+    if current_idx >= len(questions):
+        # Todas las preguntas respondidas
+        _finalize(conv, "menu_completado")
+        return [_build_menu_completion_message(conv, config)]
+    
+    current_q = questions[current_idx]
+    
+    # Guardar respuesta
+    if current_q.get("options"):
+        # Menú numérico
+        valid_values = [opt["value"] for opt in current_q["options"]]
+        if text in valid_values:
+            d[f"menu_{current_q['id']}"] = text
+            # Buscar el label correspondiente
+            for opt in current_q["options"]:
+                if opt["value"] == text:
+                    d[f"menu_{current_q['id']}_label"] = opt["label"]
+                    break
+        else:
+            # Opción inválida, pedir de nuevo
+            options_text = "\n".join([f"{opt['value']} - {opt['label']}" for opt in current_q["options"]])
+            return [f"Opción inválida. Por favor seleccioná una de estas opciones:\n\n{options_text}"]
+    else:
+        # Texto libre
+        d[f"menu_{current_q['id']}"] = text
+    
+    # Avanzar a la siguiente pregunta
+    next_idx = current_idx + 1
+    d["menu_current_question"] = next_idx
+    
+    if next_idx >= len(questions):
+        # Todas las preguntas respondidas
+        _finalize(conv, "menu_completado")
+        return [_build_menu_completion_message(conv, config)]
+    
+    # Mostrar siguiente pregunta
+    next_q = questions[next_idx]
+    response = [f"✅ Gracias. Ahora:\n\n📋 {next_q['question']}"]
+    
+    if next_q.get("options"):
+        for opt in next_q["options"]:
+            response.append(f"{opt['value']} - {opt['label']}")
+    else:
+        response.append("(Escribí tu respuesta)")
+    
+    return response
+
+
+def _build_menu_completion_message(conv, config):
+    """Construye el mensaje de finalización del menú."""
+    d = conv.get("data") or {}
+    nombre = conv.get("lead_name") or ""
+    estudio = _study_name(config)
+    
+    # Recopilar respuestas
+    respuestas = []
+    for key, value in d.items():
+        if key.startswith("menu_") and not key.endswith("_label") and key != "menu_current_question":
+            respuestas.append(f"• {key.replace("menu_", "").replace("_", " ").title()}: {value}")
+    
+    respuestas_text = "\n".join(respuestas)
+    
+    return (
+        f"¡Gracias, {nombre}! Ya tenemos toda tu información:\n\n"
+        f"{respuestas_text}\n\n"
+        f"Un profesional del equipo de {estudio} se comunicará con vos pronto "
+        f"para coordinar la reunión.\n\n"
+        f"Si necesitás algo más, podés escribirnos por este medio."
+    )
