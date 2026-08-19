@@ -56,21 +56,21 @@ DEFAULT_MENU_QUESTIONS = [
         "id": "lugar",
         "question": "¿Dónde ocurrió el accidente?",
         "options": [
-            {"value": "1", "label": "En el trabajo"},
+            {"value": "1", "label": "En el lugar de trabajo"},
             {"value": "2", "label": "En el camino al trabajo"},
             {"value": "3", "label": "Volviendo del trabajo"}
         ]
     },
     {
         "id": "horario",
-        "question": "📅 ¿Qué día y horario te viene bien para una reunión?",
+        "question": "📅 ¿Qué día y horario te viene bien para una reunión con un profesional?",
         "options": [],
         "free_text": True,
         "required": True
     },
     {
         "id": "lesion",
-        "question": "🩺 ¿Qué lesión o problema de salud te generó el accidente?",
+        "question": "🩺 ¿Qué lesión o problema de salud te generó el accidente laboral?",
         "options": [],
         "free_text": True,
         "required": True
@@ -112,26 +112,39 @@ def build_menu_message(nombre, config):
     if not menu["enabled"]:
         return None
     
-    intro = menu["intro"] or f"Hola {nombre}, para poder brindarte la mejor atención, necesitamos hacerte algunas preguntas."
+    # Intro por defecto mejorada
+    intro = menu["intro"]
+    if not intro:
+        intro = (
+            f"Hola {nombre}. 👋\n\n"
+            f"Para poder derivarte con el profesional adecuado según tu situación, "
+            f"necesitamos hacerte algunas preguntas breves. No te preocupes, "
+            f"son solo para entender mejor tu caso y brindarte la mejor atención.\n\n"
+            f"Responde con el número de cada opción:"
+        )
     
     lines = [intro, ""]
     
     for i, q in enumerate(menu["questions"], 1):
-        lines.append(f"📋 {q['question']}")
+        lines.append(f"📋 *Pregunta {i}:* {q['question']}")
         if q.get("options"):
             for opt in q["options"]:
-                lines.append(f"{opt['value']} - {opt['label']}")
+                lines.append(f"   {opt['value']} - {opt['label']}")
         else:
-            lines.append("(Escribí tu respuesta)")
+            lines.append("   (Escribí tu respuesta libre)")
         lines.append("")
     
-    lines.append("Empecemos con la primera pregunta:")
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     lines.append("")
-    lines.append(f"1️⃣ {menu['questions'][0]['question']}")
+    lines.append("¡Empecemos! ✨")
+    lines.append("")
+    lines.append(f"*1️⃣ {menu['questions'][0]['question']}*")
     
     if menu["questions"][0].get("options"):
         for opt in menu["questions"][0]["options"]:
-            lines.append(f"{opt['value']} - {opt['label']}")
+            lines.append(f"   {opt['value']} - {opt['label']}")
+    else:
+        lines.append("   (Escribí tu respuesta)")
     
     return "\n".join(lines)
 

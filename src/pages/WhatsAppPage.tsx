@@ -172,7 +172,7 @@ export default function WhatsAppPage() {
     bot_slot_1: "",
     bot_slot_2: "",
     bot_menu_enabled: false,
-    bot_menu_intro: "",
+    bot_menu_intro: "", // Dejar vacío para usar el intro por defecto del backend
     bot_menu_questions: [
       {
         id: "antiguedad",
@@ -187,21 +187,21 @@ export default function WhatsAppPage() {
         id: "lugar",
         question: "¿Dónde ocurrió el accidente?",
         options: [
-          { value: "1", label: "En el trabajo" },
+          { value: "1", label: "En el lugar de trabajo" },
           { value: "2", label: "En el camino al trabajo" },
           { value: "3", label: "Volviendo del trabajo" },
         ],
       },
       {
         id: "horario",
-        question: "📅 ¿Qué día y horario te viene bien para una reunión?",
+        question: "📅 ¿Qué día y horario te viene bien para una reunión con un profesional?",
         options: [],
         free_text: true,
         required: true,
       },
       {
         id: "lesion",
-        question: "🩺 ¿Qué lesión o problema de salud te generó el accidente?",
+        question: "🩺 ¿Qué lesión o problema de salud te generó el accidente laboral?",
         options: [],
         free_text: true,
         required: true,
@@ -999,18 +999,25 @@ export default function WhatsAppPage() {
 
                   <div className="rounded-lg bg-cyan-500/10 border border-cyan-500/25 p-3">
                     <p className="text-xs text-cyan-200">
-                      <strong>Vista previa del menú:</strong><br />
-                      {botForm.bot_menu_intro && <>{botForm.bot_menu_intro}<br /><br /></>}
+                      <strong>Vista previa del menú:</strong><br /><br />
+                      {botForm.bot_menu_intro || (
+                        <>Hola [nombre]. 👋<br /><br />Para poder derivarte con el profesional adecuado según tu situación, necesitamos hacerte algunas preguntas breves. No te preocupes, son solo para entender mejor tu caso y brindarte la mejor atención.<br /><br />Responde con el número de cada opción:<br /><br /></>
+                      )}
                       {botForm.bot_menu_questions.map((q, idx) => (
                         <span key={q.id}>
-                          📋 {q.question}<br />
+                          📋 *Pregunta {idx + 1}:* {q.question}<br />
                           {q.options && q.options.map((opt) => (
-                            <span key={opt.value}>{opt.value} - {opt.label}<br /></span>
+                            <span key={opt.value}>   {opt.value} - {opt.label}<br /></span>
                           ))}
-                          {!q.free_text && q.options?.length === 0 && "(Opciones)\n"}
-                          {q.free_text && "(Escribí tu respuesta)\n"}
+                          {q.free_text && "   (Escribí tu respuesta libre)<br />"}
                           <br />
                         </span>
+                      ))}
+                      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━<br /><br />
+                      ¡Empecemos! ✨<br /><br />
+                      *1️⃣ {botForm.bot_menu_questions[0]?.question || "(Primera pregunta)"}*<br />
+                      {botForm.bot_menu_questions[0]?.options?.map((opt) => (
+                        <span key={opt.value}>   {opt.value} - {opt.label}<br /></span>
                       ))}
                     </p>
                   </div>
