@@ -932,58 +932,106 @@ export default function WhatsAppPage() {
             Conversaciones del bot
           </h2>
           <p className="section-subtitle">
-            Estado de cada contacto dentro del flujo de orientación, con la prioridad asignada
-            y el motivo de cierre.
+            Mensajes recibidos por el bot de orientación, con el estado del flujo
+            y la posibilidad de responder directamente.
           </p>
         </div>
-        <div className="overflow-x-auto">
-          <table className="table">
-            <thead>
-              <tr>
-                <th className="text-left">Contacto</th>
-                <th className="text-left">Etapa</th>
-                <th className="text-left">Prioridad</th>
-                <th className="text-left">Estado</th>
-                <th className="text-left">Actualizado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(botConversationsQuery.data?.data ?? []).length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="text-center text-text-muted py-8">
-                    Aun no hay conversaciones del bot.
-                  </td>
-                </tr>
-              ) : (
-                (botConversationsQuery.data?.data ?? []).map((conv, index) => (
-                  <tr key={conv.phone_e164 || `bot-conv-${index}`}>
-                    <td>
-                      <div className="font-medium text-text-primary">
-                        {conv.lead_name || conv.phone_e164 || "-"}
+        <div className="space-y-3">
+          {(botConversationsQuery.data?.data ?? []).length === 0 ? (
+            <div className="text-center text-text-muted py-8">
+              Aun no hay conversaciones del bot.
+            </div>
+          ) : (
+            (botConversationsQuery.data?.data ?? []).map((conv, index) => (
+              <div
+                key={conv.phone_e164 || `bot-conv-${index}`}
+                className="rounded-2xl border border-white/10 bg-white/5 p-4"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="font-medium text-text-primary">
+                      {conv.lead_name || conv.phone_e164 || "Sin nombre"}
+                    </div>
+                    <div className="text-xs text-text-muted mt-1">
+                      {conv.phone_e164 || "Telefono no identificado"}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`badge ${
+                        conv.priority === "Alta"
+                          ? "badge-empresa"
+                          : conv.priority === "Media"
+                            ? "badge-argentina"
+                            : "badge-persona"
+                      }`}
+                    >
+                      {conv.priority || "-"}
+                    </span>
+                    <div className="text-xs text-text-muted">
+                      {formatDate(conv.updated_at)}
+                    </div>
+                  </div>
+                </div>
+                <div className="text-sm text-text-secondary mt-3">
+                  <span className="text-text-muted">Etapa:</span> {stageLabel(conv.stage)}
+                  <span className="mx-2">·</span>
+                  <span className="text-text-muted">Estado:</span> {botCloseLabel(conv)}
+                </div>
+                {conv.summary && (
+                  <div className="text-sm text-text-secondary mt-2 line-clamp-2">
+                    {conv.summary.descripcion_breve || conv.summary.lesion_informada || "Sin detalle disponible"}
+                  </div>
+                )}
+                <div className="mt-3 text-xs text-text-muted">
+                  {conv.replies_count} respuestas · {conv.followups_sent} followups
+                  {conv.appointment_set && " · Turno agendado"}
+                </div>
+                {conv.phone_e164 && (
+                  <div className="mt-3">
+                    {replyTarget === `bot-${conv.phone_e164}` ? (
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          className="input flex-1"
+                          placeholder="Escribi tu respuesta..."
+                          value={replyText}
+                          onChange={(e) => setReplyText(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !isReplying) {
+                              handleSendReply(conv.phone_e164!);
+                            }
+                          }}
+                          autoFocus
+                        />
+                        <button
+                          className="btn btn-primary"
+                          disabled={isReplying || !replyText.trim()}
+                          onClick={() => handleSendReply(conv.phone_e164!)}
+                        >
+                          {isReplying ? "Enviando..." : "Enviar"}
+                        </button>
+                        <button
+                          className="btn btn-ghost"
+                          onClick={() => { setReplyTarget(null); setReplyText(""); }}
+                        >
+                          Cancelar
+                        </button>
                       </div>
-                      <div className="text-xs text-text-muted">{conv.phone_e164 || ""}</div>
-                    </td>
-                    <td className="text-sm">{stageLabel(conv.stage)}</td>
-                    <td>
-                      <span
-                        className={`badge ${
-                          conv.priority === "Alta"
-                            ? "badge-empresa"
-                            : conv.priority === "Media"
-                              ? "badge-argentina"
-                              : "badge-persona"
-                        }`}
+                    ) : (
+                      <button
+                        className="btn btn-ghost text-sm text-fuchsia-300 hover:text-fuchsia-200"
+                        onClick={() => setReplyTarget(`bot-${conv.phone_e164}`)}
                       >
-                        {conv.priority || "-"}
-                      </span>
-                    </td>
-                    <td className="text-sm">{botCloseLabel(conv)}</td>
-                    <td className="text-sm text-text-muted">{formatDate(conv.updated_at)}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                        <Send className="w-3 h-3 inline mr-1" />
+                        Responder
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))
+          )}
         </div>
       </section>
 
