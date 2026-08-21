@@ -11,7 +11,6 @@ from urllib import request as urllib_request
 from services.bot_service import (
     DEFAULT_BOT_CONFIG,
     build_first_message,
-    build_menu_message as bot_build_menu_message,
     ensure_conversation as bot_ensure_conversation,
     get_bot_config as bot_get_config,
     get_bot_conversation as bot_get_conversation,
@@ -20,6 +19,7 @@ from services.bot_service import (
     list_bot_conversations as bot_list_conversations,
     bot_stats as bot_stats,
     run_due_followups as bot_due_followups,
+    _build_menu_initial_message,
 )
 
 
@@ -516,13 +516,17 @@ def _send_bot_menu_after_template(to_phone, lead_name="", lead_id=""):
             lead_name=lead_name,
         )
 
-        # Construir y enviar el menú
-        menu_msg = bot_build_menu_message(lead_name or "", bot_cfg)
-        if menu_msg:
-            send_text_message(to_phone, menu_msg)
-            # Marcar que el menú fue enviado
-            conv.setdefault("data", {})["menu_sent"] = True
-            conv["updated_at"] = _utc_now()
+        # Construir y enviar el menú inicial (2 opciones)
+        menu_cfg = bot_get_menu_config(bot_cfg)
+        if menu_cfg.get("enabled"):
+            menu_msg = _build_menu_initial_message(bot_cfg)
+            if menu_msg:
+                send_text_message(to_phone, menu_msg)
+                # Marcar que el menú fue enviado
+                conv.setdefault("data", {})["menu_sent"] = True
+                conv.setdefault("data", {})["menu_current_question"] = 0
+                conv["stage"] = "menu_awaiting_choice"
+                conv["updated_at"] = _utc_now()
 
     _mutate_store(_apply)
 
@@ -794,13 +798,15 @@ def process_webhook(payload, leads):
                         conv = (store.get("bot_conversations") or {}).get(phone_e164)
                         if conv and not conv.get("closed"):
                             menu_cfg = bot_get_menu_config(bot_cfg)
-                            # Si el menú está activo y no se envió aún, enviarlo primero
+                            # Si el menú está activo y no se envió aún, enviar el mensaje inicial (2 opciones)
                             if menu_cfg.get("enabled") and not conv.get("data", {}).get("menu_sent"):
-                                menu_msg = bot_build_menu_message(conv.get("lead_name") or "", bot_cfg)
+                                menu_msg = _build_menu_initial_message(bot_cfg)
                                 if menu_msg:
                                     try:
                                         send_text_message(phone_e164, menu_msg)
                                         conv.setdefault("data", {})["menu_sent"] = True
+                                        conv.setdefault("data", {})["menu_current_question"] = 0
+                                        conv["stage"] = "menu_awaiting_choice"
                                         conv["updated_at"] = _utc_now()
                                         _append_message_record(
                                             store,

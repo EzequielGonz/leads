@@ -176,7 +176,7 @@ export default function WhatsAppPage() {
     bot_menu_questions: [
       {
         id: "antiguedad",
-        question: "¿Cuánto tiempo de antiguedad tiene tu caso?",
+        question: "📋 Pregunta 1: ¿Cuánto tiempo de antiguedad tiene tu caso?",
         options: [
           { value: "1", label: "Menos de 1 año" },
           { value: "2", label: "De 1 a 5 años" },
@@ -185,7 +185,7 @@ export default function WhatsAppPage() {
       },
       {
         id: "lugar",
-        question: "¿Dónde ocurrió el accidente?",
+        question: "📋 Pregunta 2: ¿Dónde ocurrió el accidente?",
         options: [
           { value: "1", label: "En el lugar de trabajo" },
           { value: "2", label: "En el camino al trabajo" },
@@ -194,14 +194,34 @@ export default function WhatsAppPage() {
       },
       {
         id: "horario",
-        question: "📅 ¿Qué día y horario te viene bien para una reunión con un profesional?",
-        options: [],
-        free_text: true,
-        required: true,
+        question: "📋 Pregunta 3: 📅 ¿Qué día y horario te viene bien para una reunión con un profesional?",
+        options: [
+          { value: "1", label: "Lunes" },
+          { value: "2", label: "Martes" },
+          { value: "3", label: "Miércoles" },
+          { value: "4", label: "Jueves" },
+          { value: "5", label: "Viernes" },
+          { value: "6", label: "9:30" },
+          { value: "7", label: "10:00" },
+          { value: "8", label: "10:30" },
+          { value: "9", label: "11:00" },
+          { value: "10", label: "11:30" },
+          { value: "11", label: "12:00" },
+          { value: "12", label: "12:30" },
+          { value: "13", label: "13:00" },
+          { value: "14", label: "13:30" },
+          { value: "15", label: "14:00" },
+          { value: "16", label: "14:30" },
+          { value: "17", label: "15:00" },
+          { value: "18", label: "15:30" },
+          { value: "19", label: "16:00" },
+          { value: "20", label: "16:30" },
+          { value: "21", label: "17:00" },
+        ],
       },
       {
         id: "lesion",
-        question: "🩺 ¿Qué lesión o problema de salud te generó el accidente laboral?",
+        question: "📋 Pregunta 4: 🩺 ¿Qué lesión o problema de salud te generó el accidente laboral?",
         options: [],
         free_text: true,
         required: true,
@@ -999,13 +1019,19 @@ export default function WhatsAppPage() {
 
                   <div className="rounded-lg bg-cyan-500/10 border border-cyan-500/25 p-3">
                     <p className="text-xs text-cyan-200">
-                      <strong>Vista previa del menú:</strong><br /><br />
+                      <strong>Vista previa del flujo del bot:</strong><br /><br />
+                      <strong>Paso 1 — Mensaje inicial (se envía después de la plantilla):</strong><br />
+                      ¿Tu caso todavía está pendiente o ya pudiste resolverlo?<br /><br />
+                      1 - Mi caso ya está resuelto<br />
+                      2 - Mi caso está pendiente<br /><br />
+                      <strong>Paso 2 — Si elige "Mi caso está pendiente":</strong><br />
                       {botForm.bot_menu_intro || (
                         <>Para poder derivarte con el profesional adecuado según tu situación, necesitamos hacerte algunas preguntas breves. No te preocupes, son solo para entender mejor tu caso y brindarte la mejor atención.<br /><br />Responde con el número de cada opción:<br /><br /></>
                       )}
+                      <strong>Paso 3 — Preguntas (una por una):</strong><br />
                       {botForm.bot_menu_questions.map((q, idx) => (
                         <span key={q.id}>
-                          📋 *Pregunta {idx + 1}:* {q.question}<br />
+                          {q.question}<br />
                           {q.options && q.options.map((opt) => (
                             <span key={opt.value}>   {opt.value} - {opt.label}<br /></span>
                           ))}
@@ -1013,12 +1039,8 @@ export default function WhatsAppPage() {
                           <br />
                         </span>
                       ))}
-                      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━<br /><br />
-                      ¡Empecemos! ✨<br /><br />
-                      *1️⃣ {botForm.bot_menu_questions[0]?.question || "(Primera pregunta)"}*<br />
-                      {botForm.bot_menu_questions[0]?.options?.map((opt) => (
-                        <span key={opt.value}>   {opt.value} - {opt.label}<br /></span>
-                      ))}
+                      <strong>Paso 4 — Cierre:</strong><br />
+                      Perfecto, [Nombre]. Un profesional se va a estar contactando con vos brevemente.<br />
                     </p>
                   </div>
                 </div>

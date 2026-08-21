@@ -45,7 +45,7 @@ DEFAULT_BOT_CONFIG = {
 DEFAULT_MENU_QUESTIONS = [
     {
         "id": "antiguedad",
-        "question": "¿Cuánto tiempo de antiguedad tiene tu caso?",
+        "question": "📋 Pregunta 1: ¿Cuánto tiempo de antiguedad tiene tu caso?",
         "options": [
             {"value": "1", "label": "Menos de 1 año"},
             {"value": "2", "label": "De 1 a 5 años"},
@@ -54,7 +54,7 @@ DEFAULT_MENU_QUESTIONS = [
     },
     {
         "id": "lugar",
-        "question": "¿Dónde ocurrió el accidente?",
+        "question": "📋 Pregunta 2: ¿Dónde ocurrió el accidente?",
         "options": [
             {"value": "1", "label": "En el lugar de trabajo"},
             {"value": "2", "label": "En el camino al trabajo"},
@@ -63,14 +63,34 @@ DEFAULT_MENU_QUESTIONS = [
     },
     {
         "id": "horario",
-        "question": "📅 ¿Qué día y horario te viene bien para una reunión con un profesional?",
-        "options": [],
-        "free_text": True,
-        "required": True
+        "question": "📋 Pregunta 3: 📅 ¿Qué día y horario te viene bien para una reunión con un profesional?",
+        "options": [
+            {"value": "1", "label": "Lunes"},
+            {"value": "2", "label": "Martes"},
+            {"value": "3", "label": "Miércoles"},
+            {"value": "4", "label": "Jueves"},
+            {"value": "5", "label": "Viernes"},
+            {"value": "6", "label": "9:30"},
+            {"value": "7", "label": "10:00"},
+            {"value": "8", "label": "10:30"},
+            {"value": "9", "label": "11:00"},
+            {"value": "10", "label": "11:30"},
+            {"value": "11", "label": "12:00"},
+            {"value": "12", "label": "12:30"},
+            {"value": "13", "label": "13:00"},
+            {"value": "14", "label": "13:30"},
+            {"value": "15", "label": "14:00"},
+            {"value": "16", "label": "14:30"},
+            {"value": "17", "label": "15:00"},
+            {"value": "18", "label": "15:30"},
+            {"value": "19", "label": "16:00"},
+            {"value": "20", "label": "16:30"},
+            {"value": "21", "label": "17:00"}
+        ]
     },
     {
         "id": "lesion",
-        "question": "🩺 ¿Qué lesión o problema de salud te generó el accidente laboral?",
+        "question": "📋 Pregunta 4: 🩺 ¿Qué lesión o problema de salud te generó el accidente laboral?",
         "options": [],
         "free_text": True,
         "required": True
@@ -106,46 +126,69 @@ def get_menu_config(config):
     }
 
 
-def build_menu_message(nombre, config):
-    """Construye el mensaje del menú numérico."""
-    menu = get_menu_config(config)
-    if not menu["enabled"]:
-        return None
-    
-    # Intro por defecto - sin saludo (el saludo ya va en la plantilla)
-    intro = menu["intro"]
-    if not intro:
-        intro = (
-            f"Para poder derivarte con el profesional adecuado según tu situación, "
-            f"necesitamos hacerte algunas preguntas breves. No te preocupes, "
-            f"son solo para entender mejor tu caso y brindarte la mejor atención.\n\n"
-            f"Responde con el número de cada opción:"
-        )
-    
-    lines = [intro, ""]
-    
-    for i, q in enumerate(menu["questions"], 1):
-        lines.append(f"📋 *Pregunta {i}:* {q['question']}")
-        if q.get("options"):
-            for opt in q["options"]:
-                lines.append(f"   {opt['value']} - {opt['label']}")
-        else:
-            lines.append("   (Escribí tu respuesta libre)")
-        lines.append("")
-    
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    lines.append("")
-    lines.append("¡Empecemos! ✨")
-    lines.append("")
-    lines.append(f"*1️⃣ {menu['questions'][0]['question']}*")
-    
-    if menu["questions"][0].get("options"):
-        for opt in menu["questions"][0]["options"]:
-            lines.append(f"   {opt['value']} - {opt['label']}")
-    else:
-        lines.append("   (Escribí tu respuesta)")
-    
+def _build_menu_initial_message(config):
+    """Construye el mensaje inicial con las 2 opciones (resuelto / pendiente)."""
+    return (
+        "¿Tu caso todavía está pendiente o ya pudiste resolverlo?\n\n"
+        "1 - Mi caso ya está resuelto\n"
+        "2 - Mi caso está pendiente"
+    )
+
+
+def _build_menu_intro():
+    """Construye el texto de intro después de elegir 'pendiente'."""
+    return (
+        "Para poder derivarte con el profesional adecuado según tu\n"
+        "situación, necesitamos hacerte algunas preguntas breves.\n"
+        "No te preocupes, son solo para entender mejor tu caso y\n"
+        "brindarte la mejor atención.\n\n"
+        "Responde con el número de cada opción:"
+    )
+
+
+def _build_menu_q1(questions):
+    """Construye el mensaje de la pregunta 1."""
+    q = questions[0]
+    lines = [q["question"]]
+    for opt in q["options"]:
+        lines.append(f"   {opt['value']} - {opt['label']}")
     return "\n".join(lines)
+
+
+def _build_menu_q2(questions):
+    """Construye el mensaje de la pregunta 2."""
+    q = questions[1]
+    lines = [q["question"]]
+    for opt in q["options"]:
+        lines.append(f"   {opt['value']} - {opt['label']}")
+    return "\n".join(lines)
+
+
+def _build_menu_q3(questions):
+    """Construye el mensaje de la pregunta 3 (días y horarios)."""
+    q = questions[2]
+    lines = [q["question"]]
+    for opt in q["options"]:
+        lines.append(f"   {opt['value']} - {opt['label']}")
+    lines.append("")
+    lines.append("(Escribí el número del día y el número del horario)")
+    return "\n".join(lines)
+
+
+def _build_menu_q4(questions):
+    """Construye el mensaje de la pregunta 4 (texto libre)."""
+    q = questions[3]
+    return f"{q['question']}\n\n(Escribí tu respuesta)"
+
+
+def _build_menu_completion(conv, config):
+    """Construye el mensaje de cierre después de completar todas las preguntas."""
+    nombre = conv.get("lead_name") or ""
+    estudio = _study_name(config)
+    return (
+        f"Perfecto{', ' + nombre if nombre else ''}. "
+        f"Un profesional se va a estar contactando con vos brevemente."
+    )
 
 
 def get_bot_config(store=None):
@@ -1218,84 +1261,76 @@ def handle_inbound(conv, raw_text, config, lead=None):
 # ---------------------------------------------------------------------------
 
 def _handle_menu_flow(conv, text, config, lead, menu_config):
-    """Maneja el flujo del menú numérico."""
+    """Maneja el flujo del menú numérico paso a paso."""
     d = conv.setdefault("data", {})
     questions = menu_config["questions"]
-    
-    # Si es la primera vez, enviar el menú completo
-    if conv.get("stage") == "awaiting_status" or conv.get("stage") == "menu_start":
-        _set_stage(conv, "menu_q1")
-        d["menu_current_question"] = 0
-        return [build_menu_message(conv.get("lead_name") or "", config)]
-    
-    # Obtener la pregunta actual
-    current_idx = d.get("menu_current_question", 0)
-    if current_idx >= len(questions):
-        # Todas las preguntas respondidas
-        _finalize(conv, "menu_completado")
-        return [_build_menu_completion_message(conv, config)]
-    
-    current_q = questions[current_idx]
-    
-    # Guardar respuesta
-    if current_q.get("options"):
-        # Menú numérico
-        valid_values = [opt["value"] for opt in current_q["options"]]
-        if text in valid_values:
-            d[f"menu_{current_q['id']}"] = text
-            # Buscar el label correspondiente
+    stage = conv.get("stage")
+
+    # --- Etapa: enviar mensaje inicial con 2 opciones ---
+    if stage in ("awaiting_status", "menu_start"):
+        _set_stage(conv, "menu_awaiting_choice")
+        return [_build_menu_initial_message(config)]
+
+    # --- Etapa: esperar elección (1=resuelto, 2=pendiente) ---
+    if stage == "menu_awaiting_choice":
+        t = text.strip()
+        if t == "1":
+            # Caso resuelto -> cerrar
+            _finalize(conv, "caso_resuelto")
+            return ["Entiendo, gracias por responder. Si tu caso ya está resuelto, no continuaremos contactándote. ¡Éxitos!"]
+        elif t == "2":
+            # Caso pendiente -> enviar intro y primera pregunta
+            d["menu_current_question"] = 0
+            _set_stage(conv, "menu_q1")
+            intro = _build_menu_intro()
+            q1_msg = _build_menu_q1(questions)
+            return [intro, q1_msg]
+        else:
+            return ["Perdón, no entendí.\n\nPor favor respondé con:\n1 - Mi caso ya está resuelto\n2 - Mi caso está pendiente"]
+
+    # --- Etapa: preguntas 1 a 4 ---
+    menu_stages = ["menu_q1", "menu_q2", "menu_q3", "menu_q4"]
+    if stage in menu_stages:
+        current_idx = menu_stages.index(stage)
+        current_q = questions[current_idx]
+
+        # Validar y guardar respuesta
+        if current_q.get("options"):
+            valid_values = [opt["value"] for opt in current_q["options"]]
+            if text.strip() not in valid_values:
+                options_text = "\n".join([f"   {opt['value']} - {opt['label']}" for opt in current_q["options"]])
+                return [f"Perdón, no entendí. Por favor elegí una de estas opciones:\n\n{options_text}"]
+            # Guardar valor y label
+            d[f"menu_{current_q['id']}"] = text.strip()
             for opt in current_q["options"]:
-                if opt["value"] == text:
+                if opt["value"] == text.strip():
                     d[f"menu_{current_q['id']}_label"] = opt["label"]
                     break
         else:
-            # Opción inválida, pedir de nuevo
-            options_text = "\n".join([f"{opt['value']} - {opt['label']}" for opt in current_q["options"]])
-            return [f"Opción inválida. Por favor seleccioná una de estas opciones:\n\n{options_text}"]
-    else:
-        # Texto libre
-        d[f"menu_{current_q['id']}"] = text
-    
-    # Avanzar a la siguiente pregunta
-    next_idx = current_idx + 1
-    d["menu_current_question"] = next_idx
-    
-    if next_idx >= len(questions):
-        # Todas las preguntas respondidas
-        _finalize(conv, "menu_completado")
-        return [_build_menu_completion_message(conv, config)]
-    
-    # Mostrar siguiente pregunta
-    next_q = questions[next_idx]
-    response = [f"✅ Gracias. Ahora:\n\n📋 {next_q['question']}"]
-    
-    if next_q.get("options"):
-        for opt in next_q["options"]:
-            response.append(f"{opt['value']} - {opt['label']}")
-    else:
-        response.append("(Escribí tu respuesta)")
-    
-    return response
+            # Texto libre
+            d[f"menu_{current_q['id']}"] = text.strip()
 
+        # Avanzar
+        next_idx = current_idx + 1
 
-def _build_menu_completion_message(conv, config):
-    """Construye el mensaje de finalización del menú."""
-    d = conv.get("data") or {}
-    nombre = conv.get("lead_name") or ""
-    estudio = _study_name(config)
-    
-    # Recopilar respuestas
-    respuestas = []
-    for key, value in d.items():
-        if key.startswith("menu_") and not key.endswith("_label") and key != "menu_current_question":
-            respuestas.append(f"• {key.replace("menu_", "").replace("_", " ").title()}: {value}")
-    
-    respuestas_text = "\n".join(respuestas)
-    
-    return (
-        f"¡Gracias, {nombre}! Ya tenemos toda tu información:\n\n"
-        f"{respuestas_text}\n\n"
-        f"Un profesional del equipo de {estudio} se comunicará con vos pronto "
-        f"para coordinar la reunión.\n\n"
-        f"Si necesitás algo más, podés escribirnos por este medio."
-    )
+        if next_idx >= len(questions):
+            # Todas las preguntas respondidas -> cierre
+            _finalize(conv, "menu_completado")
+            return [_build_menu_completion(conv, config)]
+
+        # Enviar siguiente pregunta
+        next_q = questions[next_idx]
+        _set_stage(conv, menu_stages[next_idx])
+
+        if next_q.get("id") == "horario":
+            return [_build_menu_q3(questions)]
+        elif next_q.get("id") == "lesion":
+            return [_build_menu_q4(questions)]
+        else:
+            lines = [next_q["question"]]
+            for opt in next_q["options"]:
+                lines.append(f"   {opt['value']} - {opt['label']}")
+            return ["\n".join(lines)]
+
+    # Si llegamos aquí, la conversación ya está en otro estado
+    return []
