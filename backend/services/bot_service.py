@@ -64,29 +64,9 @@ DEFAULT_MENU_QUESTIONS = [
     {
         "id": "horario",
         "question": "📋 Pregunta 3: 📅 ¿Qué día y horario te viene bien para una reunión con un profesional?",
-        "options": [
-            {"value": "1", "label": "Lunes"},
-            {"value": "2", "label": "Martes"},
-            {"value": "3", "label": "Miércoles"},
-            {"value": "4", "label": "Jueves"},
-            {"value": "5", "label": "Viernes"},
-            {"value": "6", "label": "9:30"},
-            {"value": "7", "label": "10:00"},
-            {"value": "8", "label": "10:30"},
-            {"value": "9", "label": "11:00"},
-            {"value": "10", "label": "11:30"},
-            {"value": "11", "label": "12:00"},
-            {"value": "12", "label": "12:30"},
-            {"value": "13", "label": "13:00"},
-            {"value": "14", "label": "13:30"},
-            {"value": "15", "label": "14:00"},
-            {"value": "16", "label": "14:30"},
-            {"value": "17", "label": "15:00"},
-            {"value": "18", "label": "15:30"},
-            {"value": "19", "label": "16:00"},
-            {"value": "20", "label": "16:30"},
-            {"value": "21", "label": "17:00"}
-        ]
+        "options": [],
+        "free_text": True,
+        "required": True
     },
     {
         "id": "lesion",
@@ -165,14 +145,9 @@ def _build_menu_q2(questions):
 
 
 def _build_menu_q3(questions):
-    """Construye el mensaje de la pregunta 3 (días y horarios)."""
+    """Construye el mensaje de la pregunta 3 (texto libre)."""
     q = questions[2]
-    lines = [q["question"]]
-    for opt in q["options"]:
-        lines.append(f"   {opt['value']} - {opt['label']}")
-    lines.append("")
-    lines.append("(Escribí el número del día y el número del horario)")
-    return "\n".join(lines)
+    return f"{q['question']}\n\n(Escribí tu respuesta)"
 
 
 def _build_menu_q4(questions):
