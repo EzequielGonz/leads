@@ -1248,12 +1248,22 @@ def _handle_menu_flow(conv, text, config, lead, menu_config):
 
     # --- Etapa: esperar elección (1=resuelto, 2=pendiente) ---
     if stage == "menu_awaiting_choice":
-        t = text.strip()
-        if t == "1":
+        t = _norm(text)
+        is_resuelto = (
+            t == "1"
+            or "resuelto" in t or "resolv" in t or "solucion" in t
+            or "arregl" in t or "cierre" in t or "ya esta" in t and "resuelto" in t
+        )
+        is_pendiente = (
+            t == "2"
+            or "pendiente" in t or "no lo resolv" in t or "no lo solucion" in t
+            or "todavia no" in t or "aun no" in t
+        )
+        if is_resuelto and not is_pendiente:
             # Caso resuelto -> cerrar
             _finalize(conv, "caso_resuelto")
             return ["Entiendo, gracias por responder. Si tu caso ya está resuelto, no continuaremos contactándote. ¡Éxitos!"]
-        elif t == "2":
+        elif is_pendiente:
             # Caso pendiente -> enviar intro y primera pregunta
             d["menu_current_question"] = 0
             _set_stage(conv, "menu_q1")
