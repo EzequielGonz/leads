@@ -199,9 +199,9 @@ export default function ExplorerPage() {
   });
 
   const sendTemplatesQuery = useQuery({
-    queryKey: ["explorer-send-templates", Boolean(sendTarget)],
+    queryKey: ["explorer-send-templates"],
     queryFn: getWhatsAppTemplates,
-    enabled: Boolean(sendTarget),
+    enabled: Boolean(sendTarget) || showBatchPanel,
     staleTime: 60_000,
     retry: false,
   });
