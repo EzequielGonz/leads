@@ -95,6 +95,23 @@ def _save_store_data():
 _load_store_data()
 
 
+# ---------------------------------------------------------------------------
+# Keep-alive: ping self every 10 min to prevent Render free tier sleep
+# ---------------------------------------------------------------------------
+import threading, time, urllib.request
+
+def _keep_alive():
+    while True:
+        time.sleep(600)  # 10 minutes
+        try:
+            urllib.request.urlopen("https://leads-imos.onrender.com/api/health", timeout=10)
+        except Exception:
+            pass
+
+_keep_alive_thread = threading.Thread(target=_keep_alive, daemon=True)
+_keep_alive_thread.start()
+
+
 def _make_json_error(message, status=400):
     resp = jsonify({"error": message, "status": status})
     resp.status_code = status
@@ -272,13 +289,19 @@ def upload_file():
         files_store.insert(0, file_info)
         _save_store_data()
 
+        # Strip heavy raw_data from preview to keep response small
+        clean_preview = []
+        for p in (preview or []):
+            cp = {k: v for k, v in p.items() if k != "raw_data"}
+            clean_preview.append(cp)
+
         return jsonify({
             "file_id": file_id,
             "filename": original_filename,
             "total_rows": total_leads,
             "columns_detected": list(columns),
-            "leads": preview,
-            "preview_rows": preview,
+            "leads": clean_preview,
+            "preview_rows": clean_preview,
             "sheet_names": sheet_names,
         })
     except Exception as e:
