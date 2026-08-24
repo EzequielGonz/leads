@@ -22,7 +22,9 @@ from services.database import (
     find_lead_by_phone_fast,
 )
 
-from services.excel_processor import read_excel, read_excel_chunked, get_sheet_names
+from services.excel_processor import (
+    read_excel, get_sheet_names, _stream_xlsx, _stream_csv, _sanitize_cell,
+)
 from services.lead_analyzer import (
     process_row,
     suggest_column_mapping,
@@ -180,52 +182,76 @@ def upload_file():
             except Exception:
                 sheet_names = None
 
-        # Read the Excel into a DataFrame (minimal memory: just the raw data)
-        from services.excel_processor import _prepare_dataframe, _sanitize_value
+        # --- Pass 1: stream first 50 rows to detect column mapping ---
         try:
-            df, columns, total_rows = _prepare_dataframe(save_path, sheet_name=sheet_name)
+            if ext == ".csv":
+                stream1 = _stream_csv(save_path)
+            elif ext in (".xlsx", ".xlsm"):
+                stream1 = _stream_xlsx(save_path, sheet_name=sheet_name)
+            else:
+                return _make_json_error("Formato .xls no soportado. Use .xlsx", 400)
         except Exception as e:
             return _make_json_error(f"Error leyendo archivo: {str(e)}", 400)
 
-        if df is None or total_rows == 0:
+        columns = None
+        sample_rows = []
+        for cols, rows in stream1:
+            columns = cols
+            for raw in rows:
+                sample_rows.append(raw)
+                if len(sample_rows) >= 50:
+                    break
+            break
+
+        if not columns:
             return _make_json_error("El archivo no contiene filas de datos", 400)
 
-        # Detect column mapping from first few rows (not all rows)
-        sample_rows = []
-        sample_size = min(50, total_rows)
-        for idx in range(sample_size):
-            row_dict = {col: _sanitize_value(df.iloc[idx][col]) or "" for col in columns}
-            sample_rows.append(row_dict)
         column_mapping = suggest_column_mapping(columns)
         if not column_mapping:
             column_mapping = guess_column_mapping_by_content(sample_rows)
         del sample_rows
         gc.collect()
 
-        # Process DataFrame row by row in chunks, save to DB, then free
-        CHUNK_SIZE = 200
+        # --- Pass 2: stream ALL rows with correct mapping, save in chunks ---
+        try:
+            if ext == ".csv":
+                stream2 = _stream_csv(save_path)
+            elif ext in (".xlsx", ".xlsm"):
+                stream2 = _stream_xlsx(save_path, sheet_name=sheet_name)
+            else:
+                return _make_json_error("Formato .xls no soportado", 400)
+        except Exception as e:
+            return _make_json_error(f"Error releyendo archivo: {str(e)}", 400)
+
         total_leads = 0
         preview = []
-        for start in range(0, total_rows, CHUNK_SIZE):
-            end = min(start + CHUNK_SIZE, total_rows)
-            chunk_leads = []
-            for idx in range(start, end):
-                raw = {col: _sanitize_value(df.iloc[idx][col]) or "" for col in columns}
+        chunk_leads = []
+        CHUNK_SIZE = 100
+
+        for cols, rows in stream2:
+            for raw in rows:
+                total_leads += 1
                 lead = process_row(raw, column_mapping)
                 lead["source_file"] = original_filename
                 lead["file_id"] = file_id
                 chunk_leads.append(lead)
-                del raw
+
+                if len(chunk_leads) >= CHUNK_SIZE:
+                    insert_leads_batch(chunk_leads)
+                    if not preview:
+                        preview = chunk_leads[:5]
+                    del chunk_leads
+                    chunk_leads = []
+                    gc.collect()
+            break
+
+        # Save remaining
+        if chunk_leads:
             insert_leads_batch(chunk_leads)
-            total_leads += len(chunk_leads)
             if not preview:
                 preview = chunk_leads[:5]
             del chunk_leads
             gc.collect()
-
-        # Free the DataFrame immediately
-        del df
-        gc.collect()
 
         file_info = {
             "id": file_id,
