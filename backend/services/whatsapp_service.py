@@ -21,6 +21,7 @@ from services.bot_service import (
     run_due_followups as bot_due_followups,
     _build_menu_initial_message,
 )
+from services.database import save_whatsapp_store, load_whatsapp_store
 
 
 GRAPH_BASE_URL = "https://graph.facebook.com"
@@ -62,6 +63,18 @@ def _default_store():
 
 
 def _read_store():
+    # Try SQLite first (persists across Render restarts)
+    try:
+        db_store = load_whatsapp_store()
+        if db_store and isinstance(db_store, dict) and db_store.get("config"):
+            base = _default_store()
+            for key in base:
+                if key in db_store and isinstance(db_store[key], type(base[key])):
+                    base[key] = db_store[key]
+            return base
+    except Exception:
+        pass
+    # Fall back to JSON file
     if not os.path.exists(STORE_PATH):
         return _default_store()
     try:
@@ -73,14 +86,27 @@ def _read_store():
         for key in base:
             if key in data and isinstance(data[key], type(base[key])):
                 base[key] = data[key]
+        # Migrate to SQLite
+        try:
+            save_whatsapp_store(base)
+        except Exception:
+            pass
         return base
     except Exception:
         return _default_store()
 
 
 def _write_store(store):
-    with open(STORE_PATH, "w", encoding="utf-8") as f:
-        json.dump(store, f, ensure_ascii=False, indent=2)
+    # Write to both JSON and SQLite
+    try:
+        with open(STORE_PATH, "w", encoding="utf-8") as f:
+            json.dump(store, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+    try:
+        save_whatsapp_store(store)
+    except Exception:
+        pass
 
 
 def _mutate_store(mutator):

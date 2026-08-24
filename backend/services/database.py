@@ -47,6 +47,16 @@ def init_db():
             created_at TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS bot_config (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS whatsapp_store (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_leads_file_id ON leads(file_id);
     """)
     conn.commit()
@@ -150,6 +160,60 @@ def delete_all():
     """Elimina todos los datos."""
     delete_all_leads()
     delete_all_files()
+
+
+# ---------------------------------------------------------------------------
+# Bot Config (persist in SQLite)
+# ---------------------------------------------------------------------------
+def save_bot_config(config_dict):
+    """Guarda la config del bot como key-value pairs."""
+    conn = _get_conn()
+    conn.execute("DELETE FROM bot_config")
+    for key, value in config_dict.items():
+        conn.execute(
+            "INSERT INTO bot_config (key, value) VALUES (?, ?)",
+            (key, json.dumps(value, ensure_ascii=False) if not isinstance(value, str) else value),
+        )
+    conn.commit()
+
+
+def load_bot_config():
+    """Carga la config del bot."""
+    conn = _get_conn()
+    rows = conn.execute("SELECT key, value FROM bot_config").fetchall()
+    config = {}
+    for row in rows:
+        try:
+            config[row["key"]] = json.loads(row["value"])
+        except (json.JSONDecodeError, TypeError):
+            config[row["key"]] = row["value"]
+    return config
+
+
+# ---------------------------------------------------------------------------
+# WhatsApp Store (persist in SQLite)
+# ---------------------------------------------------------------------------
+def save_whatsapp_store(store_dict):
+    """Guarda el whatsapp store completo como un JSON."""
+    conn = _get_conn()
+    conn.execute("DELETE FROM whatsapp_store")
+    conn.execute(
+        "INSERT INTO whatsapp_store (key, value) VALUES (?, ?)",
+        ("store", json.dumps(store_dict, ensure_ascii=False)),
+    )
+    conn.commit()
+
+
+def load_whatsapp_store():
+    """Carga el whatsapp store completo."""
+    conn = _get_conn()
+    row = conn.execute("SELECT value FROM whatsapp_store WHERE key = 'store'").fetchone()
+    if row:
+        try:
+            return json.loads(row["value"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return {}
 
 
 # Inicializar al importar
