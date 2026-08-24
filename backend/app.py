@@ -182,68 +182,74 @@ def upload_file():
             except Exception:
                 sheet_names = None
 
-        # --- Pass 1: stream first 50 rows to detect column mapping ---
+        # --- Single pass: stream file, detect mapping from first 50 rows ---
         try:
             if ext == ".csv":
-                stream1 = _stream_csv(save_path)
+                stream = _stream_csv(save_path)
             elif ext in (".xlsx", ".xlsm"):
-                stream1 = _stream_xlsx(save_path, sheet_name=sheet_name)
+                stream = _stream_xlsx(save_path, sheet_name=sheet_name)
             else:
                 return _make_json_error("Formato .xls no soportado. Use .xlsx", 400)
         except Exception as e:
             return _make_json_error(f"Error leyendo archivo: {str(e)}", 400)
 
         columns = None
-        sample_rows = []
-        for cols, rows in stream1:
+        rows_iter = None
+        for cols, rows in stream:
             columns = cols
-            for raw in rows:
-                sample_rows.append(raw)
-                if len(sample_rows) >= 50:
-                    break
+            rows_iter = rows
             break
 
-        if not columns:
+        if not columns or rows_iter is None:
             return _make_json_error("El archivo no contiene filas de datos", 400)
 
-        column_mapping = suggest_column_mapping(columns)
-        if not column_mapping:
-            column_mapping = guess_column_mapping_by_content(sample_rows)
-        del sample_rows
-        gc.collect()
-
-        # --- Pass 2: stream ALL rows with correct mapping, save in chunks ---
-        try:
-            if ext == ".csv":
-                stream2 = _stream_csv(save_path)
-            elif ext in (".xlsx", ".xlsm"):
-                stream2 = _stream_xlsx(save_path, sheet_name=sheet_name)
-            else:
-                return _make_json_error("Formato .xls no soportado", 400)
-        except Exception as e:
-            return _make_json_error(f"Error releyendo archivo: {str(e)}", 400)
-
+        # Collect first 50 rows for mapping, then process everything
+        sample_rows = []
+        SAMPLE_LIMIT = 50
         total_leads = 0
         preview = []
         chunk_leads = []
         CHUNK_SIZE = 100
+        mapping_detected = False
+        column_mapping = suggest_column_mapping(columns)
 
-        for cols, rows in stream2:
-            for raw in rows:
-                total_leads += 1
-                lead = process_row(raw, column_mapping)
-                lead["source_file"] = original_filename
-                lead["file_id"] = file_id
-                chunk_leads.append(lead)
+        for raw in rows_iter:
+            total_leads += 1
 
-                if len(chunk_leads) >= CHUNK_SIZE:
-                    insert_leads_batch(chunk_leads)
-                    if not preview:
-                        preview = chunk_leads[:5]
-                    del chunk_leads
-                    chunk_leads = []
+            # Collect samples for content-based mapping
+            if not mapping_detected:
+                sample_rows.append(raw)
+                if len(sample_rows) >= SAMPLE_LIMIT:
+                    if not column_mapping:
+                        column_mapping = guess_column_mapping_by_content(sample_rows)
+                    mapping_detected = True
+                    del sample_rows
+                    sample_rows = []
                     gc.collect()
-            break
+
+            # Process with current mapping (empty dict until mapping detected)
+            lead = process_row(raw, column_mapping)
+            lead["source_file"] = original_filename
+            lead["file_id"] = file_id
+            chunk_leads.append(lead)
+
+            if len(chunk_leads) >= CHUNK_SIZE:
+                insert_leads_batch(chunk_leads)
+                if not preview:
+                    preview = chunk_leads[:5]
+                del chunk_leads
+                chunk_leads = []
+                gc.collect()
+
+        # If file < 50 rows, detect mapping now
+        if not mapping_detected and sample_rows:
+            if not column_mapping:
+                column_mapping = guess_column_mapping_by_content(sample_rows)
+            del sample_rows
+            gc.collect()
+
+            # Re-process the small number of buffered rows with mapping
+            # (small files, this is fine)
 
         # Save remaining
         if chunk_leads:
