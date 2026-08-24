@@ -10,7 +10,6 @@ import {
   Activity,
   MessagesSquare,
   Bot,
-  CheckCircle,
 } from "lucide-react";
 import { useToast } from "@/components/Toast";
 import { useNotificationSound } from "@/hooks/useNotificationSound";
@@ -1179,80 +1178,6 @@ export default function WhatsAppPage() {
                         <Send className="w-3 h-3 inline mr-1" />
                         Responder
                       </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))
-          )}
-        </div>
-      </section>
-
-      {/* CASOS A DERIVAR */}
-      <section className="glass-card gradient-border-top p-6 overflow-hidden mt-2">
-        <div className="mb-4">
-          <h2 className="section-title text-xl sm:text-2xl flex items-center gap-2">
-            <CheckCircle className="w-5 h-5 text-emerald-300" />
-            Casos a Derivar
-          </h2>
-          <p className="section-subtitle">
-            Conversaciones finalizadas listas para ser derivadas a un profesional.
-          </p>
-        </div>
-        <div className="space-y-3">
-          {(botConversationsQuery.data?.data ?? []).filter((c) => c.closed).length === 0 ? (
-            <div className="text-center text-text-muted py-8">
-              Aun no hay casos cerrados.
-            </div>
-          ) : (
-            (botConversationsQuery.data?.data ?? []).filter((c) => c.closed).map((conv, index) => (
-              <div
-                key={conv.phone_e164 || `closed-${index}`}
-                className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <div className="font-medium text-text-primary">
-                      {conv.lead_name || "Sin nombre"}
-                    </div>
-                    <div className="text-xs text-text-muted mt-1">
-                      {conv.phone_e164 || "Telefono no identificado"}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="badge badge-persona">
-                      {conv.close_reason || "Cerrado"}
-                    </span>
-                    <div className="text-xs text-text-muted">
-                      {formatDate(conv.closed_at || conv.updated_at)}
-                    </div>
-                  </div>
-                </div>
-                {conv.data && (
-                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                    {conv.data.menu_antiguedad_label && (
-                      <div>
-                        <span className="text-text-muted">Antiguedad: </span>
-                        <span className="text-text-secondary">{conv.data.menu_antiguedad_label}</span>
-                      </div>
-                    )}
-                    {conv.data.menu_lugar_label && (
-                      <div>
-                        <span className="text-text-muted">Lugar: </span>
-                        <span className="text-text-secondary">{conv.data.menu_lugar_label}</span>
-                      </div>
-                    )}
-                    {conv.data.menu_horario && (
-                      <div>
-                        <span className="text-text-muted">Horario: </span>
-                        <span className="text-text-secondary">{conv.data.menu_horario}</span>
-                      </div>
-                    )}
-                    {conv.data.menu_lesion && (
-                      <div className="sm:col-span-2">
-                        <span className="text-text-muted">Lesion: </span>
-                        <span className="text-text-secondary">{conv.data.menu_lesion}</span>
-                      </div>
                     )}
                   </div>
                 )}

@@ -8,6 +8,7 @@ import UploadPage from "@/pages/UploadPage";
 import ExplorerPage from "@/pages/ExplorerPage";
 import AnalysisPage from "@/pages/AnalysisPage";
 import WhatsAppPage from "@/pages/WhatsAppPage";
+import CasosADerivarPage from "@/pages/CasosADerivarPage";
 import ScraperPage from "@/pages/ScraperPage";
 import { useAuthStore } from "@/store/useAuthStore";
 
@@ -41,6 +42,7 @@ export default function App() {
               <Route path="/explorer" element={<ExplorerPage />} />
               <Route path="/analysis" element={<AnalysisPage />} />
               <Route path="/whatsapp" element={<WhatsAppPage />} />
+              <Route path="/casos" element={<CasosADerivarPage />} />
               <Route path="/scraper" element={<ScraperPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>

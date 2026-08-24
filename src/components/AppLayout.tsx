@@ -12,6 +12,7 @@ import {
   Sparkles,
   MessageCircle,
   LogOut,
+  CheckCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -28,6 +29,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Explorar Datos", to: "/explorer", icon: Database },
   { label: "Análisis & Export", to: "/analysis", icon: BarChart3 },
   { label: "WhatsApp", to: "/whatsapp", icon: MessageCircle },
+  { label: "Casos a Derivar", to: "/casos", icon: CheckCircle },
   { label: "Scraper Instagram", to: "/scraper", icon: Instagram },
 ];
 
@@ -37,6 +39,7 @@ const BREADCRUMB_LABELS: Record<string, string> = {
   "/explorer": "Explorar Datos",
   "/analysis": "Análisis & Export",
   "/whatsapp": "WhatsApp",
+  "/casos": "Casos a Derivar",
   "/scraper": "Scraper Instagram",
 };
 
