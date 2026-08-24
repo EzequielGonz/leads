@@ -1188,15 +1188,15 @@ export default function WhatsAppPage() {
         </div>
       </section>
 
-      {/* CASOS CERRADOS */}
-      <section className="glass-card gradient-border-top p-6 overflow-hidden">
+      {/* CASOS A DERIVAR */}
+      <section className="glass-card gradient-border-top p-6 overflow-hidden mt-2">
         <div className="mb-4">
           <h2 className="section-title text-xl sm:text-2xl flex items-center gap-2">
             <CheckCircle className="w-5 h-5 text-emerald-300" />
-            Casos cerrados
+            Casos a Derivar
           </h2>
           <p className="section-subtitle">
-            Conversaciones finalizadas con informacion del caso.
+            Conversaciones finalizadas listas para ser derivadas a un profesional.
           </p>
         </div>
         <div className="space-y-3">
