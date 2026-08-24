@@ -9,6 +9,7 @@ from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import gc
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -17,10 +18,11 @@ from services.database import (
     save_files, load_files, delete_all_files,
     export_all, import_all, delete_all,
     insert_leads_batch, load_leads_paginated, load_leads_for_file,
-    count_leads, delete_leads_for_file,
+    count_leads, delete_leads_for_file, get_dashboard_stats,
+    find_lead_by_phone_fast,
 )
 
-from services.excel_processor import read_excel, get_sheet_names
+from services.excel_processor import read_excel, read_excel_chunked, get_sheet_names
 from services.lead_analyzer import (
     process_row,
     suggest_column_mapping,
@@ -178,41 +180,52 @@ def upload_file():
             except Exception:
                 sheet_names = None
 
+        # Read the Excel into a DataFrame (minimal memory: just the raw data)
+        from services.excel_processor import _prepare_dataframe, _sanitize_value
         try:
-            rows = read_excel(save_path, sheet_name=sheet_name)
+            df, columns, total_rows = _prepare_dataframe(save_path, sheet_name=sheet_name)
         except Exception as e:
             return _make_json_error(f"Error leyendo archivo: {str(e)}", 400)
 
-        if not rows:
+        if df is None or total_rows == 0:
             return _make_json_error("El archivo no contiene filas de datos", 400)
 
-        columns = list(rows[0].keys())
+        # Detect column mapping from first few rows (not all rows)
+        sample_rows = []
+        sample_size = min(50, total_rows)
+        for idx in range(sample_size):
+            row_dict = {col: _sanitize_value(df.iloc[idx][col]) or "" for col in columns}
+            sample_rows.append(row_dict)
         column_mapping = suggest_column_mapping(columns)
         if not column_mapping:
-            column_mapping = guess_column_mapping_by_content(rows)
+            column_mapping = guess_column_mapping_by_content(sample_rows)
+        del sample_rows
+        gc.collect()
 
-        # Process in chunks to avoid memory issues (Render free tier: 512MB)
-        CHUNK_SIZE = 500
+        # Process DataFrame row by row in chunks, save to DB, then free
+        CHUNK_SIZE = 200
         total_leads = 0
         preview = []
-        for i in range(0, len(rows), CHUNK_SIZE):
-            chunk = rows[i:i + CHUNK_SIZE]
+        for start in range(0, total_rows, CHUNK_SIZE):
+            end = min(start + CHUNK_SIZE, total_rows)
             chunk_leads = []
-            for raw in chunk:
+            for idx in range(start, end):
+                raw = {col: _sanitize_value(df.iloc[idx][col]) or "" for col in columns}
                 lead = process_row(raw, column_mapping)
                 lead["source_file"] = original_filename
                 lead["file_id"] = file_id
                 chunk_leads.append(lead)
+                del raw
             insert_leads_batch(chunk_leads)
             total_leads += len(chunk_leads)
             if not preview:
                 preview = chunk_leads[:5]
-            # Free memory
             del chunk_leads
-            del chunk
+            gc.collect()
 
-        # Free the full rows list
-        del rows
+        # Free the DataFrame immediately
+        del df
+        gc.collect()
 
         file_info = {
             "id": file_id,
@@ -364,44 +377,37 @@ def get_lead(lead_id):
 def dashboard_stats():
     try:
         file_id = request.args.get("file_id")
-        # Load from DB instead of memory
-        base = load_leads_for_file(file_id) if file_id else load_leads()
+        # Use SQL-based stats (no full lead load = no memory spike)
+        stats = get_dashboard_stats(file_id)
 
-        total = len(base)
-        argentina_count = sum(1 for l in base if l.get("es_argentina"))
-        emails_count = sum(1 for l in base if l.get("email"))
-        telefonos_count = sum(1 for l in base if l.get("telefono"))
-        instagram_count = sum(1 for l in base if l.get("instagram"))
+        # For tipo and ubicacion, only load a lightweight subset
+        base = load_leads_for_file(file_id) if file_id else []
+        if not base and not file_id:
+            # Only load for top-level stats (not file-specific)
+            base = []
 
         tipo_counter = Counter()
+        ubic_counter = Counter()
         for l in base:
             tp = l.get("tipo_perfil") or "sin_clasificar"
             tipo_counter[tp] += 1
-        por_tipo = dict(tipo_counter)
-
-        ubic_counter = Counter()
-        for l in base:
             ub = (l.get("ubicacion") or "").strip().lower()
-            if not ub:
-                continue
-            canonical = None
-            for loc in ARGENTINA_LOCATIONS:
-                if loc in ub or ub in loc:
-                    canonical = loc
-                    break
-            key = canonical or ub
-            ubic_counter[key] += 1
+            if ub:
+                canonical = None
+                for loc in ARGENTINA_LOCATIONS:
+                    if loc in ub or ub in loc:
+                        canonical = loc
+                        break
+                ubic_counter[canonical or ub] += 1
+
+        por_tipo = dict(tipo_counter)
         top_ubic = sorted(ubic_counter.items(), key=lambda x: (-x[1], x[0]))[:10]
         por_ubicacion = {k: v for k, v in top_ubic}
 
         return jsonify({
-            "total_leads": total,
-            "argentina_count": argentina_count,
+            **stats,
             "por_tipo": por_tipo,
             "por_ubicacion": por_ubicacion,
-            "emails_count": emails_count,
-            "telefonos_count": telefonos_count,
-            "instagram_count": instagram_count,
         })
     except Exception as e:
         traceback.print_exc()
@@ -841,8 +847,8 @@ def whatsapp_batch_cancel():
 def whatsapp_webhook_receive():
     try:
         payload = request.get_json(silent=True) or {}
-        all_leads = load_leads()
-        result = process_webhook(payload, all_leads)
+        # Use DB search instead of loading all leads into memory
+        result = process_webhook(payload, [], find_lead_fn=find_lead_by_phone_fast)
         return jsonify({"received": True, **result})
     except Exception as e:
         return _make_json_error(f"Error procesando webhook: {str(e)}", 500)

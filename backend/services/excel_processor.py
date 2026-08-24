@@ -104,6 +104,22 @@ def _df_to_records(df):
     return records
 
 
+def _df_to_records_chunked(df, chunk_size=500):
+    """Yields chunks of records from a DataFrame to avoid memory spikes."""
+    total = len(df)
+    for start in range(0, total, chunk_size):
+        chunk = []
+        end = min(start + chunk_size, total)
+        for idx in range(start, end):
+            row = df.iloc[idx]
+            record = {}
+            for col in df.columns:
+                val = _sanitize_value(row[col])
+                record[col] = val if val is not None else ""
+            chunk.append(record)
+        yield chunk
+
+
 def _looks_like_data_cell(value):
     """Un valor que casi con certeza es dato y no un encabezado."""
     if value is None:
@@ -169,7 +185,8 @@ def get_sheet_names(file_path):
     return None
 
 
-def read_excel(file_path, sheet_name=None):
+def _prepare_dataframe(file_path, sheet_name=None):
+    """Reads an Excel/CSV into a DataFrame with header detection."""
     ext = os.path.splitext(file_path)[1].lower()
 
     if ext == ".csv":
@@ -190,7 +207,7 @@ def read_excel(file_path, sheet_name=None):
         raise ValueError(f"Formato de archivo no soportado: {ext}")
 
     if df is None or df.empty:
-        return []
+        return None, None, None
 
     first_row = df.iloc[0].tolist()
     if _looks_like_header_row(first_row):
@@ -203,4 +220,26 @@ def read_excel(file_path, sheet_name=None):
     else:
         df.columns = [f"Columna_{i + 1}" for i in range(df.shape[1])]
 
+    columns = list(df.columns)
+    total_rows = len(df)
+    return df, columns, total_rows
+
+
+def read_excel(file_path, sheet_name=None):
+    """Returns all rows as a list of dicts (legacy, uses more memory)."""
+    df, columns, total_rows = _prepare_dataframe(file_path, sheet_name)
+    if df is None:
+        return []
     return _df_to_records(df)
+
+
+def read_excel_chunked(file_path, sheet_name=None, chunk_size=500):
+    """Generator: yields (columns, total_rows, chunk_iterator).
+    Each chunk is a list of ~chunk_size dicts. Uses much less memory."""
+    df, columns, total_rows = _prepare_dataframe(file_path, sheet_name)
+    if df is None:
+        return
+    for chunk in _df_to_records_chunked(df, chunk_size):
+        yield chunk
+    # Free the DataFrame
+    del df

@@ -744,7 +744,14 @@ def _update_existing_message_status(store, meta_message_id, status, status_paylo
     return updated
 
 
-def process_webhook(payload, leads):
+def process_webhook(payload, leads=None, find_lead_fn=None):
+    """Process an inbound webhook.
+    
+    find_lead_fn: optional callable(phone_e164) -> lead dict. If provided,
+    used instead of iterating the leads list (avoids loading all leads).
+    """
+    if leads is None:
+        leads = []
     results = {
         "messages_received": 0,
         "statuses_received": 0,
@@ -793,7 +800,10 @@ def process_webhook(payload, leads):
                 for message in value.get("messages") or []:
                     raw_from = message.get("from") or ""
                     phone_e164 = normalize_phone_for_whatsapp(raw_from)
-                    lead = _find_lead_by_phone(leads, phone_e164) or {}
+                    if find_lead_fn:
+                        lead = find_lead_fn(phone_e164) or {}
+                    else:
+                        lead = _find_lead_by_phone(leads, phone_e164) or {}
                     contact = contacts_by_phone.get(raw_from) or {}
                     _append_message_record(
                         store,

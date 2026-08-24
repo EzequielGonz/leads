@@ -270,6 +270,56 @@ def count_leads(file_id=None):
     return row["cnt"] if row else 0
 
 
+def get_dashboard_stats(file_id=None):
+    """Computes dashboard stats using JSON extraction in SQL — no full load."""
+    conn = _get_conn()
+    pg = _use_pg()
+    placeholder = "%s" if pg else "?"
+    where = f"WHERE file_id = {placeholder}" if file_id else ""
+    params = (file_id,) if file_id else ()
+
+    # Total
+    total = count_leads(file_id)
+
+    # Count fields present using JSON extraction
+    if pg:
+        # PostgreSQL: use jsonb extraction
+        json_op = "->>"
+        bool_check = "= 'true'" if True else ""
+        sql = f"""
+            SELECT
+                COUNT(*) FILTER (WHERE data->>'es_argentina' = 'true') as argentina,
+                COUNT(*) FILTER (WHERE data->>'email' IS NOT NULL AND data->>'email' != '') as emails,
+                COUNT(*) FILTER (WHERE data->>'telefono' IS NOT NULL AND data->>'telefono' != '') as telefonos,
+                COUNT(*) FILTER (WHERE data->>'instagram' IS NOT NULL AND data->>'instagram' != '') as instagrams
+            FROM leads {where}
+        """
+    else:
+        # SQLite: use json_extract
+        json_op = "json_extract"
+        sql = f"""
+            SELECT
+                SUM(CASE WHEN json_extract(data, '$.es_argentina') = 'true' THEN 1 ELSE 0 END) as argentina,
+                SUM(CASE WHEN json_extract(data, '$.email') IS NOT NULL AND json_extract(data, '$.email') != '' THEN 1 ELSE 0 END) as emails,
+                SUM(CASE WHEN json_extract(data, '$.telefono') IS NOT NULL AND json_extract(data, '$.telefono') != '' THEN 1 ELSE 0 END) as telefonos,
+                SUM(CASE WHEN json_extract(data, '$.instagram') IS NOT NULL AND json_extract(data, '$.instagram') != '' THEN 1 ELSE 0 END) as instagrams
+            FROM leads {where}
+        """
+    row = _fetchone(conn, sql, params)
+    argentina_count = row["argentina"] or 0 if row else 0
+    emails_count = row["emails"] or 0 if row else 0
+    telefonos_count = row["telefonos"] or 0 if row else 0
+    instagram_count = row["instagrams"] or 0 if row else 0
+
+    return {
+        "total_leads": total,
+        "argentina_count": argentina_count,
+        "emails_count": emails_count,
+        "telefonos_count": telefonos_count,
+        "instagram_count": instagram_count,
+    }
+
+
 def delete_all_leads():
     """Elimina todos los leads."""
     conn = _get_conn()
@@ -284,6 +334,29 @@ def delete_leads_for_file(file_id):
     placeholder = "%s" if pg else "?"
     _execute(conn, f"DELETE FROM leads WHERE file_id = {placeholder}", (file_id,))
     _commit(conn)
+
+
+def find_lead_by_phone(normalized_phone):
+    """Busca un lead por teléfono en la DB (sin cargar todos)."""
+    return find_lead_by_phone_fast(normalized_phone)
+
+
+def find_lead_by_phone_fast(normalized_phone):
+    """Search lead by phone using LIKE on JSON data field (no full load)."""
+    if not normalized_phone or len(normalized_phone) < 8:
+        return None
+    digits = "".join(c for c in normalized_phone if c.isdigit())
+    last8 = digits[-8:] if len(digits) >= 8 else digits
+    conn = _get_conn()
+    pg = _use_pg()
+    if pg:
+        sql = "SELECT data FROM leads WHERE data LIKE %s LIMIT 1"
+    else:
+        sql = "SELECT data FROM leads WHERE data LIKE ? LIMIT 1"
+    row = _fetchone(conn, sql, (f'%{last8}%',))
+    if row:
+        return json.loads(row["data"])
+    return None
 
 
 # ---------------------------------------------------------------------------
