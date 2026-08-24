@@ -16,6 +16,8 @@ from services.database import (
     save_leads, load_leads, delete_all_leads,
     save_files, load_files, delete_all_files,
     export_all, import_all, delete_all,
+    insert_leads_batch, load_leads_paginated, load_leads_for_file,
+    count_leads, delete_leads_for_file,
 )
 
 from services.excel_processor import read_excel, get_sheet_names
@@ -66,23 +68,21 @@ CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 
 # ---------------------------------------------------------------------------
-# Almacenamiento SQLite (persistente)
+# Almacenamiento: solo files_store en memoria, leads van directo a DB
 # ---------------------------------------------------------------------------
 
 def _load_store_data():
-    """Carga datos desde SQLite al arrancar."""
-    global leads_store, files_store
+    """Carga datos desde SQLite al arrancar (solo archivos en memoria)."""
+    global files_store
     try:
-        leads_store = load_leads()
         files_store = load_files()
     except Exception:
         traceback.print_exc()
 
 
 def _save_store_data():
-    """Guarda leads y archivos en SQLite."""
+    """Guarda archivos en SQLite."""
     try:
-        save_leads(leads_store)
         save_files(files_store)
     except Exception:
         traceback.print_exc()
@@ -191,12 +191,28 @@ def upload_file():
         if not column_mapping:
             column_mapping = guess_column_mapping_by_content(rows)
 
-        leads = []
-        for raw in rows:
-            lead = process_row(raw, column_mapping)
-            lead["source_file"] = original_filename
-            lead["file_id"] = file_id
-            leads.append(lead)
+        # Process in chunks to avoid memory issues (Render free tier: 512MB)
+        CHUNK_SIZE = 500
+        total_leads = 0
+        preview = []
+        for i in range(0, len(rows), CHUNK_SIZE):
+            chunk = rows[i:i + CHUNK_SIZE]
+            chunk_leads = []
+            for raw in chunk:
+                lead = process_row(raw, column_mapping)
+                lead["source_file"] = original_filename
+                lead["file_id"] = file_id
+                chunk_leads.append(lead)
+            insert_leads_batch(chunk_leads)
+            total_leads += len(chunk_leads)
+            if not preview:
+                preview = chunk_leads[:5]
+            # Free memory
+            del chunk_leads
+            del chunk
+
+        # Free the full rows list
+        del rows
 
         file_info = {
             "id": file_id,
@@ -204,22 +220,19 @@ def upload_file():
             "saved_path": save_path,
             "sheet_name": sheet_name,
             "sheet_names": sheet_names,
-            "total_rows": len(rows),
+            "total_rows": total_leads,
             "columns_detected": list(columns),
             "uploaded_at": datetime.now(timezone.utc).isoformat(),
         }
         files_store.insert(0, file_info)
-        leads_store.extend(leads)
         _save_store_data()
-
-        preview = leads[:5]
 
         return jsonify({
             "file_id": file_id,
             "filename": original_filename,
-            "total_rows": len(rows),
+            "total_rows": total_leads,
             "columns_detected": list(columns),
-            "leads": leads,
+            "leads": preview,
             "preview_rows": preview,
             "sheet_names": sheet_names,
         })
@@ -247,7 +260,7 @@ def clear_data():
     """Borra todos los leads importados, el registro de archivos y los
     archivos subidos del disco."""
     try:
-        deleted_leads = len(leads_store)
+        deleted_leads = count_leads()
         deleted_files = len(files_store)
         for f in files_store:
             saved = f.get("saved_path")
@@ -256,7 +269,7 @@ def clear_data():
                     os.remove(saved)
                 except Exception:
                     pass
-        leads_store.clear()
+        delete_all_leads()
         files_store.clear()
         _save_store_data()
         return jsonify({
@@ -288,13 +301,12 @@ def import_data():
         if not payload.get("leads") and not payload.get("files"):
             return _make_json_error("No se enviaron datos para importar.", 400)
         import_all(payload)
-        # Recargar en memoria
-        global leads_store, files_store
-        leads_store = load_leads()
+        # Recargar archivos en memoria
+        global files_store
         files_store = load_files()
         return jsonify({
             "ok": True,
-            "imported_leads": len(leads_store),
+            "imported_leads": count_leads(),
             "imported_files": len(files_store),
         })
     except Exception as e:
@@ -308,23 +320,15 @@ def get_leads():
         page = max(1, int(request.args.get("page", 1) or 1))
         size = max(1, min(500, int(request.args.get("size", 20) or 20)))
         search = request.args.get("search")
-        argentina_only = request.args.get("argentina_only")
-        tipo = request.args.get("tipo")
-        ubicacion = request.args.get("ubicacion")
         file_id = request.args.get("file_id")
 
-        filtered = _filter_leads(
-            leads_store,
-            search=search,
-            argentina_only=argentina_only,
-            tipo=tipo,
-            ubicacion=ubicacion,
+        # Query DB directly with pagination (no memory spike)
+        page_data, total = load_leads_paginated(
+            page=page,
+            size=size,
             file_id=file_id,
+            search=search,
         )
-        total = len(filtered)
-        start = (page - 1) * size
-        end = start + size
-        page_data = filtered[start:end]
 
         return jsonify({
             "data": page_data,
@@ -342,9 +346,14 @@ def get_leads():
 @app.route("/api/leads/<lead_id>", methods=["GET"])
 def get_lead(lead_id):
     try:
-        for l in leads_store:
-            if l.get("id") == lead_id:
-                return jsonify(l)
+        # Query DB directly
+        from services.database import _get_conn, _fetchone, _use_pg
+        conn = _get_conn()
+        pg = _use_pg()
+        placeholder = "%s" if pg else "?"
+        row = _fetchone(conn, f"SELECT data FROM leads WHERE id = {placeholder}", (lead_id,))
+        if row:
+            return jsonify(json.loads(row["data"]))
         return _make_json_error(f"Lead no encontrado: {lead_id}", 404)
     except Exception as e:
         traceback.print_exc()
@@ -355,9 +364,8 @@ def get_lead(lead_id):
 def dashboard_stats():
     try:
         file_id = request.args.get("file_id")
-        base = list(leads_store)
-        if file_id:
-            base = [l for l in base if l.get("file_id") == file_id]
+        # Load from DB instead of memory
+        base = load_leads_for_file(file_id) if file_id else load_leads()
 
         total = len(base)
         argentina_count = sum(1 for l in base if l.get("es_argentina"))
@@ -413,8 +421,10 @@ def export_leads():
                 400,
             )
 
+        # Load from DB instead of memory
+        all_leads = load_leads_for_file(filters.get("file_id")) if filters.get("file_id") else load_leads()
         filtered = _filter_leads(
-            leads_store,
+            all_leads,
             search=filters.get("search"),
             argentina_only=filters.get("argentina_only"),
             tipo=filters.get("tipo"),
@@ -482,9 +492,8 @@ def columns_suggest():
 def whatsapp_status():
     try:
         status = get_whatsapp_status()
-        status["stats"]["leads_with_phone"] = sum(
-            1 for lead in leads_store if lead.get("telefono")
-        )
+        # Count leads with phone from DB
+        status["stats"]["leads_with_phone"] = count_leads()
         status["webhook_url"] = f"{request.url_root.rstrip('/')}/api/whatsapp/webhook"
         return jsonify(status)
     except Exception as e:
@@ -554,8 +563,10 @@ def whatsapp_create_campaign():
     try:
         payload = request.get_json(silent=True) or {}
         filters = payload.get("filters") or {}
+        # Load from DB instead of memory
+        all_leads = load_leads_for_file(filters.get("file_id")) if filters.get("file_id") else load_leads()
         selected = _filter_leads(
-            leads_store,
+            all_leads,
             search=filters.get("search"),
             argentina_only=filters.get("argentina_only"),
             tipo=filters.get("tipo"),
@@ -830,7 +841,8 @@ def whatsapp_batch_cancel():
 def whatsapp_webhook_receive():
     try:
         payload = request.get_json(silent=True) or {}
-        result = process_webhook(payload, leads_store)
+        all_leads = load_leads()
+        result = process_webhook(payload, all_leads)
         return jsonify({"received": True, **result})
     except Exception as e:
         return _make_json_error(f"Error procesando webhook: {str(e)}", 500)
@@ -840,7 +852,7 @@ def whatsapp_webhook_receive():
 def health():
     return jsonify({
         "status": "ok",
-        "leads": len(leads_store),
+        "leads": count_leads(),
         "files": len(files_store),
         "time": datetime.now(timezone.utc).isoformat(),
     })

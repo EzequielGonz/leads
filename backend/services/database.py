@@ -27,7 +27,13 @@ def _get_pg_conn():
     """Obtiene (o crea) una conexión PostgreSQL por hilo."""
     if not hasattr(_local, "pg_conn") or _local.pg_conn is None:
         import psycopg2
-        _local.pg_conn = psycopg2.connect(DATABASE_URL, sslmode="require")
+        # Build connection string with SSL
+        url = DATABASE_URL
+        if "?" in url:
+            url += "&sslmode=require"
+        else:
+            url += "?sslmode=require"
+        _local.pg_conn = psycopg2.connect(url)
         _local.pg_conn.autocommit = False
     return _local.pg_conn
 
@@ -155,32 +161,128 @@ def save_leads(leads):
     """Guarda una lista completa de leads (reemplaza todos los existentes)."""
     conn = _get_conn()
     _execute(conn, "DELETE FROM leads")
-    for lead in leads:
-        _execute(
-            conn,
-            "INSERT INTO leads (id, data, file_id, created_at) VALUES (%s, %s, %s, %s)" if _use_pg()
-            else "INSERT INTO leads (id, data, file_id, created_at) VALUES (?, ?, ?, ?)",
-            (
-                lead.get("id") or lead.get("telefono", ""),
-                json.dumps(lead, ensure_ascii=False),
-                lead.get("file_id") or "",
-                lead.get("created_at") or _utc_now(),
-            ),
-        )
+    _insert_leads_batch(conn, leads)
     _commit(conn)
 
 
+def _insert_leads_batch(conn, leads):
+    """Inserta leads en lotes sin commit (usado por upload en chunks)."""
+    pg = _use_pg()
+    sql = (
+        "INSERT INTO leads (id, data, file_id, created_at) VALUES (%s, %s, %s, %s)"
+        if pg else
+        "INSERT INTO leads (id, data, file_id, created_at) VALUES (?, ?, ?, ?)"
+    )
+    for lead in leads:
+        _execute(conn, sql, (
+            lead.get("id") or lead.get("telefono", ""),
+            json.dumps(lead, ensure_ascii=False),
+            lead.get("file_id") or "",
+            lead.get("created_at") or _utc_now(),
+        ))
+
+
+def insert_leads_batch(leads):
+    """Inserta leads sin borrar los existentes. Ideal para upload."""
+    if not leads:
+        return
+    conn = _get_conn()
+    _insert_leads_batch(conn, leads)
+    _commit(conn)
+
+
+def load_leads_paginated(page=1, size=20, file_id=None, search=None):
+    """Carga leads con paginación — nunca carga todo en memoria."""
+    conn = _get_conn()
+    conditions = []
+    params = []
+    pg = _use_pg()
+    placeholder = "%s" if pg else "?"
+
+    if file_id:
+        conditions.append(f"file_id = {placeholder}")
+        params.append(file_id)
+
+    where = ""
+    if conditions:
+        where = "WHERE " + " AND ".join(conditions)
+
+    # Count total
+    count_sql = f"SELECT COUNT(*) as cnt FROM leads {where}"
+    count_row = _fetchone(conn, count_sql, params)
+    total = count_row["cnt"] if count_row else 0
+
+    # If search, we need to filter by JSON content
+    if search:
+        # Load all for this file and filter in Python (fast enough for DB-stored data)
+        sql = f"SELECT data FROM leads {where} ORDER BY created_at DESC"
+        all_rows = _fetchall(conn, sql, params)
+        all_leads = [json.loads(r["data"]) for r in all_rows]
+        q = search.lower()
+        filtered = []
+        for lead in all_leads:
+            haystack = " ".join(
+                str(v).lower() for v in lead.values() if v and not isinstance(v, (list, dict))
+            )
+            if q in haystack:
+                filtered.append(lead)
+        total = len(filtered)
+        start = (page - 1) * size
+        return filtered[start:start + size], total
+
+    # Without search, use DB pagination
+    offset = (page - 1) * size
+    sql = f"SELECT data FROM leads {where} ORDER BY created_at DESC LIMIT {placeholder} OFFSET {placeholder}"
+    rows = _fetchall(conn, sql, params + [size, offset])
+    leads = [json.loads(row["data"]) for row in rows]
+    return leads, total
+
+
 def load_leads():
-    """Carga todos los leads."""
+    """Carga todos los leads (solo para uso interno, batch, etc)."""
     conn = _get_conn()
     rows = _fetchall(conn, "SELECT data FROM leads ORDER BY created_at DESC")
     return [json.loads(row["data"]) for row in rows]
+
+
+def load_leads_for_file(file_id):
+    """Carga leads de un archivo específico."""
+    conn = _get_conn()
+    pg = _use_pg()
+    placeholder = "%s" if pg else "?"
+    rows = _fetchall(
+        conn,
+        f"SELECT data FROM leads WHERE file_id = {placeholder} ORDER BY created_at DESC",
+        (file_id,),
+    )
+    return [json.loads(row["data"]) for row in rows]
+
+
+def count_leads(file_id=None):
+    """Cuenta leads, opcionalmente filtrados por archivo."""
+    conn = _get_conn()
+    pg = _use_pg()
+    placeholder = "%s" if pg else "?"
+    if file_id:
+        row = _fetchone(conn, f"SELECT COUNT(*) as cnt FROM leads WHERE file_id = {placeholder}", (file_id,))
+    else:
+        row = _fetchone(conn, "SELECT COUNT(*) as cnt FROM leads")
+    return row["cnt"] if row else 0
 
 
 def delete_all_leads():
     """Elimina todos los leads."""
     conn = _get_conn()
     _execute(conn, "DELETE FROM leads")
+    _commit(conn)
+
+
+def delete_leads_for_file(file_id):
+    """Elimina leads de un archivo específico."""
+    conn = _get_conn()
+    pg = _use_pg()
+    placeholder = "%s" if pg else "?"
+    _execute(conn, f"DELETE FROM leads WHERE file_id = {placeholder}", (file_id,))
     _commit(conn)
 
 

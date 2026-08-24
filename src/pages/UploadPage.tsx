@@ -137,8 +137,8 @@ export default function UploadPage() {
     if (!processedResult) return;
     setImporting(true);
     try {
-      const allLeads = processedResult.leads ?? [];
-      addLeads(allLeads);
+      // Leads are already saved to DB by the backend upload endpoint
+      // Just refresh the frontend store
       prependRecentFile({
         id: processedResult.file_id,
         filename: processedResult.filename,
@@ -151,7 +151,7 @@ export default function UploadPage() {
       setImporting(false);
       success(
         "¡Importación completada!",
-        `${(allLeads.length).toLocaleString("es-AR")} leads agregados al dashboard.`
+        `${(processedResult.total_rows ?? 0).toLocaleString("es-AR")} leads guardados en la base de datos.`
       );
       setTimeout(() => navigate("/"), 900);
     } catch (e: any) {
