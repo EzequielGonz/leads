@@ -110,6 +110,7 @@ def _build_menu_initial_message(config):
     """Construye el mensaje inicial con las 2 opciones (resuelto / pendiente)."""
     return (
         "¿Tu caso todavía está pendiente o ya pudiste resolverlo?\n\n"
+        "(RESPONDE USANDO 1 O 2)\n\n"
         "1 - Mi caso ya está resuelto\n"
         "2 - Mi caso está pendiente"
     )
