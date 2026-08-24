@@ -766,6 +766,7 @@ def list_bot_conversations(store, include_closed=True):
 
 
 def _public_conversation(conv):
+    data = conv.get("data") or {}
     return {
         "phone_e164": conv.get("phone_e164"),
         "lead_name": conv.get("lead_name"),
@@ -773,13 +774,19 @@ def _public_conversation(conv):
         "closed": bool(conv.get("closed")),
         "close_reason": conv.get("close_reason") or "",
         "priority": conv.get("priority") or "",
-        "appointment_set": bool((conv.get("data") or {}).get("turno_confirmado")),
+        "appointment_set": bool(data.get("turno_confirmado")),
         "followups_sent": conv.get("followups_sent", 0),
         "replies_count": conv.get("replies_count", 0),
         "created_at": conv.get("created_at"),
         "updated_at": conv.get("updated_at"),
         "closed_at": conv.get("closed_at"),
         "summary": conv.get("summary"),
+        "data": {
+            "menu_antiguedad_label": data.get("menu_antiguedad_label") or data.get("menu_antiguedad") or "",
+            "menu_lugar_label": data.get("menu_lugar_label") or data.get("menu_lugar") or "",
+            "menu_horario": data.get("menu_horario") or "",
+            "menu_lesion": data.get("menu_lesion") or "",
+        },
     }
 
 

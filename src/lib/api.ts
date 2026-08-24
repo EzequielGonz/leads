@@ -212,6 +212,12 @@ export interface WhatsAppBotConversation {
   updated_at?: string;
   closed_at?: string | null;
   summary?: Record<string, string> | null;
+  data?: {
+    menu_antiguedad_label?: string;
+    menu_lugar_label?: string;
+    menu_horario?: string;
+    menu_lesion?: string;
+  };
 }
 
 const api = axios.create({
