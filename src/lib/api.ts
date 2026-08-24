@@ -426,4 +426,35 @@ export async function exportLeads(
   return finalBlob;
 }
 
+// ---------------------------------------------------------------------------
+// Batch sending
+// ---------------------------------------------------------------------------
+export interface BatchStatus {
+  running: boolean;
+  total: number;
+  sent: number;
+  failed: number;
+  current_phone: string;
+  current_name: string;
+  file_name: string;
+  cancelled: boolean;
+}
+
+export async function startBatchSend(payload: {
+  file_id: string;
+  template_name: string;
+  template_language?: string;
+  template_variables_key?: string;
+}): Promise<{ ok: boolean; message: string; total: number }> {
+  return api.post("/whatsapp/batch-send", payload);
+}
+
+export async function getBatchStatus(): Promise<BatchStatus> {
+  return api.get("/whatsapp/batch-status");
+}
+
+export async function cancelBatchSend(): Promise<{ ok: boolean; message: string }> {
+  return api.post("/whatsapp/batch-cancel");
+}
+
 export default api;

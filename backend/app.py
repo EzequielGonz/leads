@@ -667,6 +667,165 @@ def whatsapp_webhook_verify():
     return _make_json_error("Webhook no verificado", 403)
 
 
+# ---------------------------------------------------------------------------
+# Batch sending with delays
+# ---------------------------------------------------------------------------
+import threading
+import time
+import random
+
+_batch_state = {
+    "running": False,
+    "total": 0,
+    "sent": 0,
+    "failed": 0,
+    "current_phone": "",
+    "current_name": "",
+    "file_name": "",
+    "cancelled": False,
+}
+_batch_lock = threading.Lock()
+
+
+def _send_batch_worker(leads, template_name, template_language, template_variables_fn, file_name):
+    """Worker thread that sends messages with random delays."""
+    global _batch_state
+    with _batch_lock:
+        _batch_state = {
+            "running": True,
+            "total": len(leads),
+            "sent": 0,
+            "failed": 0,
+            "current_phone": "",
+            "current_name": "",
+            "file_name": file_name,
+            "cancelled": False,
+        }
+
+    for lead in leads:
+        # Check if cancelled
+        with _batch_lock:
+            if _batch_state["cancelled"]:
+                _batch_state["running"] = False
+                return
+
+        phone = lead.get("telefono") or lead.get("phone") or ""
+        name = lead.get("full_name") or lead.get("nombre") or ""
+
+        if not phone or len(phone) < 8:
+            with _batch_lock:
+                _batch_state["failed"] += 1
+            continue
+
+        with _batch_lock:
+            _batch_state["current_phone"] = phone
+            _batch_state["current_name"] = name
+
+        try:
+            # Build variables for this lead
+            variables = template_variables_fn(lead)
+
+            # Send template + bot menu
+            from services.whatsapp_service import send_test_message
+            result = send_test_message({
+                "to": phone,
+                "message_type": "template",
+                "template_name": template_name,
+                "template_language": template_language,
+                "template_variables": variables,
+                "lead_name": name,
+                "lead_id": lead.get("id", ""),
+            })
+            with _batch_lock:
+                _batch_state["sent"] += 1
+        except Exception as e:
+            print(f"[BATCH] Error sending to {phone}: {e}")
+            with _batch_lock:
+                _batch_state["failed"] += 1
+
+        # Random delay between 20-40 seconds
+        delay = random.uniform(20, 40)
+        time.sleep(delay)
+
+    with _batch_lock:
+        _batch_state["running"] = False
+
+
+@app.route("/api/whatsapp/batch-send", methods=["POST"])
+def whatsapp_batch_send():
+    try:
+        with _batch_lock:
+            if _batch_state["running"]:
+                return _make_json_error("Ya hay un envio en curso. Espera a que termine.", 409)
+
+        payload = request.get_json(silent=True) or {}
+        file_id = payload.get("file_id") or ""
+        template_name = (payload.get("template_name") or "").strip()
+        template_language = (payload.get("template_language") or "es_AR").strip()
+        template_variables_key = payload.get("template_variables_key") or "full_name"
+
+        if not file_id:
+            return _make_json_error("Se requiere file_id", 400)
+        if not template_name:
+            return _make_json_error("Se requiere template_name", 400)
+
+        # Get leads for this file
+        all_leads = load_leads()
+        file_leads = [l for l in all_leads if l.get("file_id") == file_id and (l.get("telefono") or l.get("phone"))]
+
+        if not file_leads:
+            return _make_json_error("No se encontraron leads con telefono para este archivo", 404)
+
+        # Get file name
+        files = load_files()
+        file_name = ""
+        for f in files:
+            if f.get("id") == file_id:
+                file_name = f.get("name") or f.get("filename") or ""
+                break
+
+        # Build variables function
+        def variables_fn(lead):
+            name = lead.get("full_name") or lead.get("nombre") or ""
+            return [
+                name,
+                "[Nombre del asesor]",
+                "[Nombre del estudio]",
+            ]
+
+        # Start batch in background thread
+        thread = threading.Thread(
+            target=_send_batch_worker,
+            args=(file_leads, template_name, template_language, variables_fn, file_name),
+            daemon=True,
+        )
+        thread.start()
+
+        return jsonify({
+            "ok": True,
+            "message": f"Envio iniciado a {len(file_leads)} numeros",
+            "total": len(file_leads),
+        })
+    except Exception as e:
+        traceback.print_exc()
+        return _make_json_error(f"Error en el servidor: {str(e)}", 500)
+
+
+@app.route("/api/whatsapp/batch-status", methods=["GET"])
+def whatsapp_batch_status():
+    with _batch_lock:
+        return jsonify(dict(_batch_state))
+
+
+@app.route("/api/whatsapp/batch-cancel", methods=["POST"])
+def whatsapp_batch_cancel():
+    with _batch_lock:
+        if _batch_state["running"]:
+            _batch_state["cancelled"] = True
+            return jsonify({"ok": True, "message": "Envio cancelado"})
+        return jsonify({"ok": False, "message": "No hay envio en curso"})
+
+
 @app.route("/api/whatsapp/webhook", methods=["POST"])
 def whatsapp_webhook_receive():
     try:

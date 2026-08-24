@@ -35,6 +35,10 @@ import {
   getWhatsAppTemplates,
   importData,
   sendWhatsAppTestMessage,
+  startBatchSend,
+  getBatchStatus,
+  cancelBatchSend,
+  type BatchStatus,
   type FileInfo,
   type Lead,
   type LeadTipo,
@@ -143,6 +147,13 @@ export default function ExplorerPage() {
     template_language: "es_AR",
     template_variables: `{{full_name}}\n[Nombre del asesor]\n[Nombre del estudio]`,
   });
+  // Batch send state
+  const [batchFileId, setBatchFileId] = useState("");
+  const [batchTemplateName, setBatchTemplateName] = useState("");
+  const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null);
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [showBatchPanel, setShowBatchPanel] = useState(false);
+
   const { success, info, error } = useToast();
 
   useEffect(() => {
@@ -261,6 +272,64 @@ export default function ExplorerPage() {
       setDeleting(false);
     }
   };
+
+  // Batch send handlers
+  const handleStartBatch = async () => {
+    if (!batchFileId || !batchTemplateName) {
+      error("Faltan datos", "Seleccioná un archivo y una plantilla.");
+      return;
+    }
+    setBatchLoading(true);
+    try {
+      await startBatchSend({
+        file_id: batchFileId,
+        template_name: batchTemplateName,
+        template_language: "es_AR",
+      });
+      success("Envio iniciado", "Los mensajes se enviarian automaticamente.");
+      // Start polling
+      pollBatchStatus();
+    } catch (e) {
+      error("No se pudo iniciar", e instanceof Error ? e.message : "Error desconocido.");
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+
+  const handleCancelBatch = async () => {
+    try {
+      await cancelBatchSend();
+      info("Cancelado", "El envio fue cancelado.");
+      setBatchStatus(null);
+    } catch (e) {
+      error("Error", "No se pudo cancelar.");
+    }
+  };
+
+  const pollBatchStatus = async () => {
+    const poll = async () => {
+      try {
+        const status = await getBatchStatus();
+        setBatchStatus(status);
+        if (status.running) {
+          setTimeout(poll, 3000);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    poll();
+  };
+
+  // Poll on mount if batch is running
+  useEffect(() => {
+    getBatchStatus().then((s) => {
+      if (s.running) {
+        setBatchStatus(s);
+        pollBatchStatus();
+      }
+    }).catch(() => {});
+  }, []);
 
   const handleExportData = async () => {
     try {
@@ -590,6 +659,114 @@ export default function ExplorerPage() {
             </div>
           </div>
         </div>
+      </section>
+
+      {/* Batch Send Section */}
+      <section className="glass-card gradient-border-top p-4 sm:p-5 opacity-0 animate-stagger-2">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Send className="w-4 h-4 text-accent-gold" />
+            <h3 className="font-display font-semibold text-text-primary">Envio automatico de mensajes</h3>
+          </div>
+          <button
+            onClick={() => setShowBatchPanel(!showBatchPanel)}
+            className="text-xs py-1.5 px-3 rounded-xl bg-accent-gold/10 border border-accent-gold/25 text-accent-gold hover:bg-accent-gold/20 transition-colors"
+          >
+            {showBatchPanel ? "Ocultar" : "Configurar envio"}
+          </button>
+        </div>
+
+        {showBatchPanel && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-text-muted mb-1 block">Archivo Excel</label>
+                <select
+                  className="input-field w-full"
+                  value={batchFileId}
+                  onChange={(e) => setBatchFileId(e.target.value)}
+                >
+                  <option value="">Seleccionar archivo...</option>
+                  {files.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.filename || f.id} ({f.total_rows} filas)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-text-muted mb-1 block">Plantilla</label>
+                <select
+                  className="input-field w-full"
+                  value={batchTemplateName}
+                  onChange={(e) => setBatchTemplateName(e.target.value)}
+                >
+                  <option value="">Seleccionar plantilla...</option>
+                  {(sendTemplates || []).map((t) => (
+                    <option key={t.name} value={t.name}>
+                      {t.name} ({t.status})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="text-xs text-text-muted bg-white/5 rounded-lg p-3">
+              <strong>Como funciona:</strong> El sistema envia un mensaje cada 20-40 segundos (con variacion aleatoria) para evitar restricciones de WhatsApp. No cierres esta pagina durante el envio.
+            </div>
+
+            {batchStatus && batchStatus.running && (
+              <div className="bg-accent-gold/10 border border-accent-gold/25 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-accent-gold">Enviando mensajes...</span>
+                  <span className="text-xs text-text-muted">
+                    {batchStatus.sent} / {batchStatus.total} enviados
+                    {batchStatus.failed > 0 && ` · ${batchStatus.failed} fallidos`}
+                  </span>
+                </div>
+                <div className="w-full bg-white/10 rounded-full h-2 mb-2">
+                  <div
+                    className="bg-accent-gold h-2 rounded-full transition-all duration-500"
+                    style={{ width: `${((batchStatus.sent + batchStatus.failed) / batchStatus.total) * 100}%` }}
+                  />
+                </div>
+                {batchStatus.current_name && (
+                  <div className="text-xs text-text-muted">
+                    Enviando a: {batchStatus.current_name} ({batchStatus.current_phone})
+                  </div>
+                )}
+                <button
+                  onClick={handleCancelBatch}
+                  className="mt-2 text-xs py-1 px-3 rounded-lg bg-red-500/10 border border-red-500/25 text-red-300 hover:bg-red-500/20 transition-colors"
+                >
+                  Cancelar envio
+                </button>
+              </div>
+            )}
+
+            {batchStatus && !batchStatus.running && batchStatus.total > 0 && (
+              <div className="bg-green-500/10 border border-green-500/25 rounded-lg p-4">
+                <div className="text-sm font-medium text-green-300">Envio completado</div>
+                <div className="text-xs text-text-muted mt-1">
+                  {batchStatus.sent} enviados · {batchStatus.failed} fallidos · {batchStatus.file_name}
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={handleStartBatch}
+              disabled={!batchFileId || !batchTemplateName || batchLoading || (batchStatus?.running ?? false)}
+              className="btn-primary text-sm"
+            >
+              {batchLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
+              Iniciar envio automatico
+            </button>
+          </div>
+        )}
       </section>
 
       <section className="opacity-0 animate-stagger-3">
