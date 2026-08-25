@@ -87,7 +87,7 @@ export default function UploadPage() {
 
       info(
         "Archivo subido",
-        `Procesando ${result.columns_detected?.length ?? 0} columnas en segundo plano...`
+        "Procesando en segundo plano..."
       );
 
       // Step 2: Poll for processing status

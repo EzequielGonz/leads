@@ -174,12 +174,51 @@ _upload_status = {}  # file_id -> {status, total_rows, processed, columns, error
 _upload_status_lock = threading.Lock()
 
 
-def _process_file_background(file_id, save_path, ext, original_filename, sheet_name, columns):
+def _process_file_background(file_id, save_path, ext, original_filename, sheet_name):
     """Process uploaded file in background thread."""
     try:
         with _upload_status_lock:
             _upload_status[file_id]["status"] = "processing"
 
+        # Detect sheet names
+        sheet_names = None
+        if ext in (".xlsx", ".xls", ".xlsm"):
+            try:
+                sheet_names = get_sheet_names(save_path)
+            except Exception:
+                sheet_names = None
+
+        # Detect columns from streaming first row
+        columns = []
+        if ext == ".csv":
+            stream_gen = _stream_csv(save_path)
+        elif ext in (".xlsx", ".xlsm"):
+            stream_gen = _stream_xlsx(save_path, sheet_name=sheet_name)
+        else:
+            with _upload_status_lock:
+                _upload_status[file_id]["status"] = "error"
+                _upload_status[file_id]["error"] = "Formato no soportado"
+            return
+
+        rows_iter = None
+        for cols, rows in stream_gen:
+            columns = list(cols)
+            rows_iter = rows
+            break
+
+        if not columns:
+            with _upload_status_lock:
+                _upload_status[file_id]["status"] = "error"
+                _upload_status[file_id]["error"] = "El archivo no contiene datos"
+            return
+
+        # Update status with detected columns
+        with _upload_status_lock:
+            _upload_status[file_id]["columns"] = columns
+            _upload_status[file_id]["sheet_names"] = sheet_names
+            _upload_status[file_id]["status"] = "processing"
+
+        # Process rows using the iterator we already have
         sample_rows = []
         SAMPLE_LIMIT = 50
         total_leads = 0
@@ -188,22 +227,6 @@ def _process_file_background(file_id, save_path, ext, original_filename, sheet_n
         CHUNK_SIZE = 100
         mapping_detected = False
         column_mapping = suggest_column_mapping(columns)
-
-        if ext == ".csv":
-            stream_gen = _stream_csv(save_path)
-        else:
-            stream_gen = _stream_xlsx(save_path, sheet_name=sheet_name)
-
-        rows_iter = None
-        for cols, rows in stream_gen:
-            rows_iter = rows
-            break
-
-        if rows_iter is None:
-            with _upload_status_lock:
-                _upload_status[file_id]["status"] = "error"
-                _upload_status[file_id]["error"] = "El archivo no contiene filas"
-            return
 
         for raw in rows_iter:
             total_leads += 1
@@ -300,56 +323,30 @@ def upload_file():
         save_path = os.path.join(app.config["UPLOAD_FOLDER"], safe_name)
         file.save(save_path)
 
-        # Get sheet names (quick, read_only=True)
-        sheet_names = None
-        if ext in (".xlsx", ".xls", ".xlsm"):
-            try:
-                sheet_names = get_sheet_names(save_path)
-            except Exception:
-                sheet_names = None
-
-        # Get columns from first pass (quick, streaming)
-        columns = None
-        if ext == ".csv":
-            stream = _stream_csv(save_path)
-        elif ext in (".xlsx", ".xlsm"):
-            stream = _stream_xlsx(save_path, sheet_name=sheet_name)
-        else:
-            return _make_json_error("Formato .xls no soportado. Use .xlsx", 400)
-
-        for cols, _ in stream:
-            columns = list(cols)
-            break
-
-        if not columns:
-            return _make_json_error("El archivo no contiene datos", 400)
-
-        # Initialize status tracker
+        # Initialize status — columns will be detected in background
         with _upload_status_lock:
             _upload_status[file_id] = {
                 "status": "pending",
                 "total_rows": 0,
                 "processed": 0,
-                "columns": columns,
+                "columns": [],
                 "error": None,
                 "filename": original_filename,
-                "sheet_names": sheet_names,
+                "sheet_names": None,
             }
 
-        # Start background processing
+        # Start background processing (detects columns + processes rows)
         t = threading.Thread(
             target=_process_file_background,
-            args=(file_id, save_path, ext, original_filename, sheet_name, columns),
+            args=(file_id, save_path, ext, original_filename, sheet_name),
             daemon=True,
         )
         t.start()
 
-        # Return IMMEDIATELY
+        # Return IMMEDIATELY — no file reading at all
         return jsonify({
             "file_id": file_id,
             "filename": original_filename,
-            "columns_detected": columns,
-            "sheet_names": sheet_names,
             "status": "processing",
         })
     except Exception as e:
