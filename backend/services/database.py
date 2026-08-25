@@ -123,6 +123,11 @@ def init_db():
                 value TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_leads_file_id ON leads(file_id);
+            CREATE TABLE IF NOT EXISTS upload_status (
+                file_id TEXT PRIMARY KEY,
+                data TEXT NOT NULL,
+                updated_at TEXT
+            );
         """)
     else:
         conn.executescript("""
@@ -146,6 +151,11 @@ def init_db():
                 value TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_leads_file_id ON leads(file_id);
+            CREATE TABLE IF NOT EXISTS upload_status (
+                file_id TEXT PRIMARY KEY,
+                data TEXT NOT NULL,
+                updated_at TEXT
+            );
         """)
     _commit(conn)
 
@@ -477,6 +487,52 @@ def load_whatsapp_store():
         except (json.JSONDecodeError, TypeError):
             pass
     return {}
+
+
+# ---------------------------------------------------------------------------
+# Upload Status (persistent across restarts)
+# ---------------------------------------------------------------------------
+def save_upload_status(file_id, status_data):
+    """Guarda el estado de un upload en la DB."""
+    conn = _get_conn()
+    pg = _use_pg()
+    placeholder = "%s" if pg else "?"
+    data = json.dumps(status_data, ensure_ascii=False)
+    # Upsert: delete old, insert new
+    _execute(conn, f"DELETE FROM upload_status WHERE file_id = {placeholder}", (file_id,))
+    _execute(
+        conn,
+        f"INSERT INTO upload_status (file_id, data, updated_at) VALUES ({placeholder}, {placeholder}, {placeholder})",
+        (file_id, data, _utc_now()),
+    )
+    _commit(conn)
+
+
+def get_upload_status(file_id):
+    """Obtiene el estado de un upload desde la DB."""
+    conn = _get_conn()
+    pg = _use_pg()
+    placeholder = "%s" if pg else "?"
+    row = _fetchone(
+        conn,
+        f"SELECT data FROM upload_status WHERE file_id = {placeholder}",
+        (file_id,),
+    )
+    if row:
+        try:
+            return json.loads(row["data"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return None
+
+
+def delete_upload_status(file_id):
+    """Elimina el estado de un upload."""
+    conn = _get_conn()
+    pg = _use_pg()
+    placeholder = "%s" if pg else "?"
+    _execute(conn, f"DELETE FROM upload_status WHERE file_id = {placeholder}", (file_id,))
+    _commit(conn)
 
 
 # Inicializar al importar

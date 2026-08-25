@@ -21,6 +21,8 @@ from services.database import (
     insert_leads_batch, load_leads_paginated, load_leads_for_file,
     count_leads, delete_leads_for_file, get_dashboard_stats,
     find_lead_by_phone_fast,
+    save_upload_status, get_upload_status as db_get_upload_status,
+    delete_upload_status,
 )
 
 from services.excel_processor import (
@@ -170,15 +172,28 @@ def _filter_leads(
 
 
 # Track background upload processing
-_upload_status = {}  # file_id -> {status, total_rows, processed, columns, error}
 _upload_status_lock = threading.Lock()
+
+def _update_upload_status(file_id, **kwargs):
+    """Update upload status in DB (persistent across restarts)."""
+    with _upload_status_lock:
+        current = db_get_upload_status(file_id) or {
+            "status": "pending",
+            "total_rows": 0,
+            "processed": 0,
+            "columns": [],
+            "error": None,
+            "filename": "",
+            "sheet_names": None,
+        }
+        current.update(kwargs)
+        save_upload_status(file_id, current)
 
 
 def _process_file_background(file_id, save_path, ext, original_filename, sheet_name):
     """Process uploaded file in background thread."""
     try:
-        with _upload_status_lock:
-            _upload_status[file_id]["status"] = "processing"
+        _update_upload_status(file_id, status="processing")
 
         # Detect sheet names
         sheet_names = None
@@ -195,9 +210,7 @@ def _process_file_background(file_id, save_path, ext, original_filename, sheet_n
         elif ext in (".xlsx", ".xlsm"):
             stream_gen = _stream_xlsx(save_path, sheet_name=sheet_name)
         else:
-            with _upload_status_lock:
-                _upload_status[file_id]["status"] = "error"
-                _upload_status[file_id]["error"] = "Formato no soportado"
+            _update_upload_status(file_id, status="error", error="Formato no soportado")
             return
 
         rows_iter = None
@@ -207,22 +220,16 @@ def _process_file_background(file_id, save_path, ext, original_filename, sheet_n
             break
 
         if not columns:
-            with _upload_status_lock:
-                _upload_status[file_id]["status"] = "error"
-                _upload_status[file_id]["error"] = "El archivo no contiene datos"
+            _update_upload_status(file_id, status="error", error="El archivo no contiene datos")
             return
 
         # Update status with detected columns
-        with _upload_status_lock:
-            _upload_status[file_id]["columns"] = columns
-            _upload_status[file_id]["sheet_names"] = sheet_names
-            _upload_status[file_id]["status"] = "processing"
+        _update_upload_status(file_id, columns=columns, sheet_names=sheet_names, status="processing")
 
         # Process rows using the iterator we already have
         sample_rows = []
         SAMPLE_LIMIT = 50
         total_leads = 0
-        preview = []
         chunk_leads = []
         CHUNK_SIZE = 100
         mapping_detected = False
@@ -252,16 +259,12 @@ def _process_file_background(file_id, save_path, ext, original_filename, sheet_n
 
             if len(chunk_leads) >= CHUNK_SIZE:
                 insert_leads_batch(chunk_leads)
-                if not preview:
-                    preview = chunk_leads[:5]
                 del chunk_leads
                 chunk_leads = []
                 gc.collect()
 
                 # Update progress every chunk
-                with _upload_status_lock:
-                    _upload_status[file_id]["processed"] = total_leads
-                    _upload_status[file_id]["total_rows"] = total_leads
+                _update_upload_status(file_id, processed=total_leads, total_rows=total_leads)
 
         if not mapping_detected and sample_rows:
             if not column_mapping:
@@ -271,8 +274,6 @@ def _process_file_background(file_id, save_path, ext, original_filename, sheet_n
 
         if chunk_leads:
             insert_leads_batch(chunk_leads)
-            if not preview:
-                preview = chunk_leads[:5]
             del chunk_leads
             gc.collect()
 
@@ -289,19 +290,13 @@ def _process_file_background(file_id, save_path, ext, original_filename, sheet_n
         files_store.insert(0, file_info)
         _save_store_data()
 
-        with _upload_status_lock:
-            _upload_status[file_id]["status"] = "done"
-            _upload_status[file_id]["total_rows"] = total_leads
-            _upload_status[file_id]["processed"] = total_leads
-            _upload_status[file_id]["columns"] = list(columns)
+        _update_upload_status(file_id, status="done", total_rows=total_leads, processed=total_leads, columns=list(columns))
 
         print(f"[UPLOAD] Done: {original_filename} -> {total_leads} leads")
 
     except Exception as e:
         traceback.print_exc()
-        with _upload_status_lock:
-            _upload_status[file_id]["status"] = "error"
-            _upload_status[file_id]["error"] = str(e)
+        _update_upload_status(file_id, status="error", error=str(e))
 
 
 @app.route("/api/upload", methods=["POST"])
@@ -328,17 +323,16 @@ def upload_file():
         save_path = os.path.join(app.config["UPLOAD_FOLDER"], safe_name)
         file.save(save_path)
 
-        # Initialize status — columns will be detected in background
-        with _upload_status_lock:
-            _upload_status[file_id] = {
-                "status": "pending",
-                "total_rows": 0,
-                "processed": 0,
-                "columns": [],
-                "error": None,
-                "filename": original_filename,
-                "sheet_names": None,
-            }
+        # Initialize status in DB — columns will be detected in background
+        save_upload_status(file_id, {
+            "status": "pending",
+            "total_rows": 0,
+            "processed": 0,
+            "columns": [],
+            "error": None,
+            "filename": original_filename,
+            "sheet_names": None,
+        })
 
         # Start background processing (detects columns + processes rows)
         t = threading.Thread(
@@ -361,10 +355,22 @@ def upload_file():
 
 @app.route("/api/upload/<file_id>/status", methods=["GET"])
 def upload_status(file_id):
-    """Check background upload progress."""
-    with _upload_status_lock:
-        status = _upload_status.get(file_id)
+    """Check background upload progress (from DB, survives restarts)."""
+    status = db_get_upload_status(file_id)
     if not status:
+        # Check if file exists in files_store (processing may have finished before status was saved)
+        file_entry = next((f for f in files_store if f["id"] == file_id), None)
+        if file_entry:
+            return jsonify({
+                "file_id": file_id,
+                "status": "done",
+                "total_rows": file_entry.get("total_rows", 0),
+                "processed": file_entry.get("total_rows", 0),
+                "columns": file_entry.get("columns_detected", []),
+                "error": None,
+                "filename": file_entry.get("filename"),
+                "sheet_names": file_entry.get("sheet_names"),
+            })
         return _make_json_error("Upload no encontrado", 404)
     return jsonify({
         "file_id": file_id,
