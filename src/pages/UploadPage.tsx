@@ -5,6 +5,7 @@ import DataTable from "@/components/DataTable";
 import { useToast } from "@/components/Toast";
 import {
   uploadFile,
+  getUploadStatus,
   suggestColumns,
   type Lead,
   type FileImportResult,
@@ -79,25 +80,74 @@ export default function UploadPage() {
   const handleProcess = async (f: File) => {
     setProcessing(true);
     try {
+      // Step 1: Upload file (returns immediately with file_id)
       const result = await uploadFile(f);
-      setProcessedResult(result);
-      setColumns(result.columns_detected || []);
-      setTotalRowsImported(result.total_rows ?? 0);
-      setProcessing(false);
-      success(
-        "Archivo procesado correctamente",
-        `Se detectaron ${result.columns_detected?.length ?? 0} columnas y ${
-          result.total_rows ?? 0
-        } filas.`
-      );
-      info("Mapeo de columnas", "Asocia cada columna si el automático no fue perfecto.");
+      const fileId = result.file_id;
 
-      try {
-        const sug = await suggestColumns(result.columns_detected || []);
-        if (sug?.mapping) {
-          setMapping(sug.mapping);
+      info(
+        "Archivo subido",
+        `Procesando ${result.columns_detected?.length ?? 0} columnas en segundo plano...`
+      );
+
+      // Step 2: Poll for processing status
+      let done = false;
+      let attempts = 0;
+      const MAX_ATTEMPTS = 300; // 5 min max
+
+      while (!done && attempts < MAX_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, 2000));
+        attempts++;
+        try {
+          const status = await getUploadStatus(fileId);
+          if (status.status === "done") {
+            done = true;
+            const finalResult: FileImportResult = {
+              file_id: fileId,
+              filename: result.filename,
+              total_rows: status.total_rows,
+              columns_detected: status.columns,
+              leads: [],
+              preview_rows: [],
+              sheet_names: status.sheet_names,
+            };
+            setProcessedResult(finalResult);
+            setColumns(status.columns || []);
+            setTotalRowsImported(status.total_rows ?? 0);
+            setProcessing(false);
+            success(
+              "Archivo procesado correctamente",
+              `Se detectaron ${status.columns?.length ?? 0} columnas y ${
+                status.total_rows ?? 0
+              } leads guardados.`
+            );
+            info("Mapeo de columnas", "Asocia cada columna si el automático no fue perfecto.");
+            try {
+              const sug = await suggestColumns(status.columns || []);
+              if (sug?.mapping) {
+                setMapping(sug.mapping);
+              }
+            } catch {}
+          } else if (status.status === "error") {
+            done = true;
+            setProcessing(false);
+            error(
+              "Error al procesar archivo",
+              status.error || "Error desconocido durante el procesamiento."
+            );
+          }
+          // else: still processing, keep polling
+        } catch {
+          // status endpoint might not be ready yet, keep trying
         }
-      } catch {}
+      }
+
+      if (!done) {
+        setProcessing(false);
+        error(
+          "Tiempo de espera agotado",
+          "El procesamiento tardó demasiado. Verificá si el archivo aparece en Explorar Datos."
+        );
+      }
     } catch (e: any) {
       setProcessing(false);
       error(

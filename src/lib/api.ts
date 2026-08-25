@@ -39,10 +39,22 @@ export interface DashboardStats {
 export interface FileImportResult {
   file_id: string;
   filename: string;
-  total_rows: number;
+  total_rows?: number;
   columns_detected: string[];
-  leads: Lead[];
-  preview_rows: Lead[];
+  leads?: Lead[];
+  preview_rows?: Lead[];
+  sheet_names?: string[];
+  status?: string;
+}
+
+export interface UploadStatus {
+  file_id: string;
+  status: string;
+  total_rows: number;
+  processed: number;
+  columns: string[];
+  error: string | null;
+  filename: string;
   sheet_names?: string[];
 }
 
@@ -246,6 +258,10 @@ export async function uploadFile(
   return api.post("/upload", formData, {
     headers: { "Content-Type": "multipart/form-data" },
   });
+}
+
+export async function getUploadStatus(fileId: string): Promise<UploadStatus> {
+  return api.get(`/upload/${fileId}/status`);
 }
 
 export async function getFiles(): Promise<{ files: FileInfo[] }> {

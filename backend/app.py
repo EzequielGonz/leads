@@ -4,6 +4,7 @@ import json
 import uuid
 import tempfile
 import traceback
+import threading
 from datetime import datetime, timezone
 from collections import Counter
 
@@ -168,6 +169,113 @@ def _filter_leads(
     return result
 
 
+# Track background upload processing
+_upload_status = {}  # file_id -> {status, total_rows, processed, columns, error}
+_upload_status_lock = threading.Lock()
+
+
+def _process_file_background(file_id, save_path, ext, original_filename, sheet_name, columns):
+    """Process uploaded file in background thread."""
+    try:
+        with _upload_status_lock:
+            _upload_status[file_id]["status"] = "processing"
+
+        sample_rows = []
+        SAMPLE_LIMIT = 50
+        total_leads = 0
+        preview = []
+        chunk_leads = []
+        CHUNK_SIZE = 100
+        mapping_detected = False
+        column_mapping = suggest_column_mapping(columns)
+
+        if ext == ".csv":
+            stream_gen = _stream_csv(save_path)
+        else:
+            stream_gen = _stream_xlsx(save_path, sheet_name=sheet_name)
+
+        rows_iter = None
+        for cols, rows in stream_gen:
+            rows_iter = rows
+            break
+
+        if rows_iter is None:
+            with _upload_status_lock:
+                _upload_status[file_id]["status"] = "error"
+                _upload_status[file_id]["error"] = "El archivo no contiene filas"
+            return
+
+        for raw in rows_iter:
+            total_leads += 1
+
+            if not mapping_detected:
+                sample_rows.append(raw)
+                if len(sample_rows) >= SAMPLE_LIMIT:
+                    if not column_mapping:
+                        column_mapping = guess_column_mapping_by_content(sample_rows)
+                    mapping_detected = True
+                    del sample_rows
+                    sample_rows = []
+                    gc.collect()
+
+            lead = process_row(raw, column_mapping)
+            lead["source_file"] = original_filename
+            lead["file_id"] = file_id
+            chunk_leads.append(lead)
+
+            if len(chunk_leads) >= CHUNK_SIZE:
+                insert_leads_batch(chunk_leads)
+                if not preview:
+                    preview = chunk_leads[:5]
+                del chunk_leads
+                chunk_leads = []
+                gc.collect()
+
+                # Update progress every chunk
+                with _upload_status_lock:
+                    _upload_status[file_id]["processed"] = total_leads
+
+        if not mapping_detected and sample_rows:
+            if not column_mapping:
+                column_mapping = guess_column_mapping_by_content(sample_rows)
+            del sample_rows
+            gc.collect()
+
+        if chunk_leads:
+            insert_leads_batch(chunk_leads)
+            if not preview:
+                preview = chunk_leads[:5]
+            del chunk_leads
+            gc.collect()
+
+        file_info = {
+            "id": file_id,
+            "filename": original_filename,
+            "saved_path": save_path,
+            "sheet_name": sheet_name,
+            "sheet_names": None,
+            "total_rows": total_leads,
+            "columns_detected": list(columns),
+            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        }
+        files_store.insert(0, file_info)
+        _save_store_data()
+
+        with _upload_status_lock:
+            _upload_status[file_id]["status"] = "done"
+            _upload_status[file_id]["total_rows"] = total_leads
+            _upload_status[file_id]["processed"] = total_leads
+            _upload_status[file_id]["columns"] = list(columns)
+
+        print(f"[UPLOAD] Done: {original_filename} -> {total_leads} leads")
+
+    except Exception as e:
+        traceback.print_exc()
+        with _upload_status_lock:
+            _upload_status[file_id]["status"] = "error"
+            _upload_status[file_id]["error"] = str(e)
+
+
 @app.route("/api/upload", methods=["POST"])
 def upload_file():
     try:
@@ -192,6 +300,7 @@ def upload_file():
         save_path = os.path.join(app.config["UPLOAD_FOLDER"], safe_name)
         file.save(save_path)
 
+        # Get sheet names (quick, read_only=True)
         sheet_names = None
         if ext in (".xlsx", ".xls", ".xlsm"):
             try:
@@ -199,114 +308,72 @@ def upload_file():
             except Exception:
                 sheet_names = None
 
-        # --- Single pass: stream file, detect mapping from first 50 rows ---
-        try:
-            if ext == ".csv":
-                stream = _stream_csv(save_path)
-            elif ext in (".xlsx", ".xlsm"):
-                stream = _stream_xlsx(save_path, sheet_name=sheet_name)
-            else:
-                return _make_json_error("Formato .xls no soportado. Use .xlsx", 400)
-        except Exception as e:
-            return _make_json_error(f"Error leyendo archivo: {str(e)}", 400)
-
+        # Get columns from first pass (quick, streaming)
         columns = None
-        rows_iter = None
-        for cols, rows in stream:
-            columns = cols
-            rows_iter = rows
+        if ext == ".csv":
+            stream = _stream_csv(save_path)
+        elif ext in (".xlsx", ".xlsm"):
+            stream = _stream_xlsx(save_path, sheet_name=sheet_name)
+        else:
+            return _make_json_error("Formato .xls no soportado. Use .xlsx", 400)
+
+        for cols, _ in stream:
+            columns = list(cols)
             break
 
-        if not columns or rows_iter is None:
-            return _make_json_error("El archivo no contiene filas de datos", 400)
+        if not columns:
+            return _make_json_error("El archivo no contiene datos", 400)
 
-        # Collect first 50 rows for mapping, then process everything
-        sample_rows = []
-        SAMPLE_LIMIT = 50
-        total_leads = 0
-        preview = []
-        chunk_leads = []
-        CHUNK_SIZE = 100
-        mapping_detected = False
-        column_mapping = suggest_column_mapping(columns)
+        # Initialize status tracker
+        with _upload_status_lock:
+            _upload_status[file_id] = {
+                "status": "pending",
+                "total_rows": 0,
+                "processed": 0,
+                "columns": columns,
+                "error": None,
+                "filename": original_filename,
+                "sheet_names": sheet_names,
+            }
 
-        for raw in rows_iter:
-            total_leads += 1
+        # Start background processing
+        t = threading.Thread(
+            target=_process_file_background,
+            args=(file_id, save_path, ext, original_filename, sheet_name, columns),
+            daemon=True,
+        )
+        t.start()
 
-            # Collect samples for content-based mapping
-            if not mapping_detected:
-                sample_rows.append(raw)
-                if len(sample_rows) >= SAMPLE_LIMIT:
-                    if not column_mapping:
-                        column_mapping = guess_column_mapping_by_content(sample_rows)
-                    mapping_detected = True
-                    del sample_rows
-                    sample_rows = []
-                    gc.collect()
-
-            # Process with current mapping (empty dict until mapping detected)
-            lead = process_row(raw, column_mapping)
-            lead["source_file"] = original_filename
-            lead["file_id"] = file_id
-            chunk_leads.append(lead)
-
-            if len(chunk_leads) >= CHUNK_SIZE:
-                insert_leads_batch(chunk_leads)
-                if not preview:
-                    preview = chunk_leads[:5]
-                del chunk_leads
-                chunk_leads = []
-                gc.collect()
-
-        # If file < 50 rows, detect mapping now
-        if not mapping_detected and sample_rows:
-            if not column_mapping:
-                column_mapping = guess_column_mapping_by_content(sample_rows)
-            del sample_rows
-            gc.collect()
-
-            # Re-process the small number of buffered rows with mapping
-            # (small files, this is fine)
-
-        # Save remaining
-        if chunk_leads:
-            insert_leads_batch(chunk_leads)
-            if not preview:
-                preview = chunk_leads[:5]
-            del chunk_leads
-            gc.collect()
-
-        file_info = {
-            "id": file_id,
-            "filename": original_filename,
-            "saved_path": save_path,
-            "sheet_name": sheet_name,
-            "sheet_names": sheet_names,
-            "total_rows": total_leads,
-            "columns_detected": list(columns),
-            "uploaded_at": datetime.now(timezone.utc).isoformat(),
-        }
-        files_store.insert(0, file_info)
-        _save_store_data()
-
-        # Strip heavy raw_data from preview to keep response small
-        clean_preview = []
-        for p in (preview or []):
-            cp = {k: v for k, v in p.items() if k != "raw_data"}
-            clean_preview.append(cp)
-
+        # Return IMMEDIATELY
         return jsonify({
             "file_id": file_id,
             "filename": original_filename,
-            "total_rows": total_leads,
-            "columns_detected": list(columns),
-            "leads": clean_preview,
-            "preview_rows": clean_preview,
+            "columns_detected": columns,
             "sheet_names": sheet_names,
+            "status": "processing",
         })
     except Exception as e:
         traceback.print_exc()
         return _make_json_error(f"Error en el servidor: {str(e)}", 500)
+
+
+@app.route("/api/upload/<file_id>/status", methods=["GET"])
+def upload_status(file_id):
+    """Check background upload progress."""
+    with _upload_status_lock:
+        status = _upload_status.get(file_id)
+    if not status:
+        return _make_json_error("Upload no encontrado", 404)
+    return jsonify({
+        "file_id": file_id,
+        "status": status["status"],
+        "total_rows": status["total_rows"],
+        "processed": status["processed"],
+        "columns": status["columns"],
+        "error": status["error"],
+        "filename": status.get("filename"),
+        "sheet_names": status.get("sheet_names"),
+    })
 
 
 @app.route("/api/files", methods=["GET"])
