@@ -310,10 +310,10 @@ def _worker(file_id: str, template_name: str, template_language: str,
                     var_list = [v.strip() for v in variables.split("\\n") if v.strip()]
 
                     result = send_template_message(
-                        phone_number=phone,
+                        to_phone=phone,
                         template_name=template_name,
                         language_code=template_language,
-                        variables=var_list[:10],
+                        body_variables=var_list[:10],
                     )
 
                     if result:
