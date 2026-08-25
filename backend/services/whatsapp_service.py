@@ -892,11 +892,15 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                                     except Exception:
                                         pass
 
-                            inbound_text = (
-                                message.get("text", {}).get("body")
-                                if message.get("type") == "text"
-                                else None
-                            )
+                            # Extract text from both text messages and interactive button replies
+                            inbound_text = None
+                            if message.get("type") == "text":
+                                inbound_text = message.get("text", {}).get("body")
+                            elif message.get("type") == "interactive":
+                                interactive = message.get("interactive") or {}
+                                button_reply = interactive.get("button_reply") or {}
+                                list_reply = interactive.get("list_reply") or {}
+                                inbound_text = button_reply.get("title") or list_reply.get("title") or None
                             try:
                                 replies = bot_handle_inbound(conv, inbound_text, bot_cfg, lead or None)
                             except Exception:
