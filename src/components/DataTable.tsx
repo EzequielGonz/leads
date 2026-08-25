@@ -157,12 +157,18 @@ const DEFAULT_COLUMNS: ColumnDef<Lead>[] = [
     },
   },
   {
-    accessorKey: "tipo_perfil",
-    header: "Tipo",
-    size: 110,
-    cell: ({ row }) => (
-      <TipoBadge tipo={row.original.tipo_perfil ?? (row.original as any).tipo} />
-    ),
+    accessorKey: "barrio",
+    header: "Barrio",
+    size: 150,
+    cell: ({ row }) => {
+      const b = (row.original as any).barrio || "—";
+      return (
+        <div className="flex items-start gap-1.5 min-w-0">
+          <MapPin className="w-3.5 h-3.5 text-accent-cyan mt-0.5 shrink-0" />
+          <span className="truncate text-sm">{b}</span>
+        </div>
+      );
+    },
   },
   {
     accessorKey: "ubicacion",
