@@ -252,7 +252,12 @@ def _process_file_background(file_id, save_path, ext, original_filename, sheet_n
                     sample_rows = []
                     gc.collect()
 
-            lead = process_row(raw, column_mapping)
+            try:
+                lead = process_row(raw, column_mapping)
+            except Exception:
+                # Skip rows that fail processing
+                total_leads -= 1
+                continue
             lead["source_file"] = original_filename
             lead["file_id"] = file_id
             chunk_leads.append(lead)
@@ -263,8 +268,10 @@ def _process_file_background(file_id, save_path, ext, original_filename, sheet_n
                 chunk_leads = []
                 gc.collect()
 
-                # Update progress every chunk
-                _update_upload_status(file_id, processed=total_leads, total_rows=total_leads)
+                # Update progress every 500 rows to avoid excessive DB writes
+                if total_leads % 500 == 0:
+                    _update_upload_status(file_id, processed=total_leads, total_rows=total_leads)
+                    print(f"[UPLOAD] Progress: {total_leads} leads processed for {original_filename}")
 
         if not mapping_detected and sample_rows:
             if not column_mapping:

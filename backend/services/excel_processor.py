@@ -43,7 +43,13 @@ def _sanitize_value(val):
     if isinstance(val, str):
         stripped = val.strip()
         return stripped
-    if isinstance(val, (pd.Timestamp, datetime, date)):
+    try:
+        import pandas as pd
+        if isinstance(val, pd.Timestamp):
+            return str(val)
+    except ImportError:
+        pass
+    if isinstance(val, (datetime, date)):
         return str(val)
     if isinstance(val, float):
         return str(int(val)) if val.is_integer() else str(val)

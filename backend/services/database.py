@@ -493,18 +493,22 @@ def load_whatsapp_store():
 # Upload Status (persistent across restarts)
 # ---------------------------------------------------------------------------
 def save_upload_status(file_id, status_data):
-    """Guarda el estado de un upload en la DB."""
+    """Guarda el estado de un upload en la DB (upsert optimizado)."""
     conn = _get_conn()
     pg = _use_pg()
-    placeholder = "%s" if pg else "?"
     data = json.dumps(status_data, ensure_ascii=False)
-    # Upsert: delete old, insert new
-    _execute(conn, f"DELETE FROM upload_status WHERE file_id = {placeholder}", (file_id,))
-    _execute(
-        conn,
-        f"INSERT INTO upload_status (file_id, data, updated_at) VALUES ({placeholder}, {placeholder}, {placeholder})",
-        (file_id, data, _utc_now()),
-    )
+    now = _utc_now()
+    if pg:
+        _execute(conn,
+            "INSERT INTO upload_status (file_id, data, updated_at) VALUES (%s, %s, %s)"
+            " ON CONFLICT (file_id) DO UPDATE SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at",
+            (file_id, data, now),
+        )
+    else:
+        _execute(conn,
+            "INSERT OR REPLACE INTO upload_status (file_id, data, updated_at) VALUES (?, ?, ?)",
+            (file_id, data, now),
+        )
     _commit(conn)
 
 
