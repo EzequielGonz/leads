@@ -1076,10 +1076,11 @@ def batch_start():
         template_name = data.get("template_name", "")
         template_language = data.get("template_language", "es_AR")
         template_variables = data.get("template_variables", "")
+        time_limit_enabled = data.get("time_limit_enabled", False)
         if not file_id or not template_name:
             return _make_json_error("Se requiere file_id y template_name", 400)
         from services.batch_sender import start_batch
-        result = start_batch(file_id, template_name, template_language, template_variables)
+        result = start_batch(file_id, template_name, template_language, template_variables, time_limit_enabled)
         if "error" in result:
             return _make_json_error(result["error"], 400)
         return jsonify(result)

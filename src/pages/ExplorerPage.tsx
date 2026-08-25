@@ -133,6 +133,7 @@ export default function ExplorerPage() {
   const [showBatchPanel, setShowBatchPanel] = useState(false);
   // Anti-spam batch
   const [antiSpamStatus, setAntiSpamStatus] = useState<BatchAntiSpamStatus | null>(null);
+  const [timeLimitEnabled, setTimeLimitEnabled] = useState(false);
 
   const { success, info, error } = useToast();
 
@@ -322,6 +323,7 @@ export default function ExplorerPage() {
         template_name: batchTemplateName,
         template_language: "es_AR",
         template_variables: "{{full_name}}\n[asesor]\n[estudio]",
+        time_limit_enabled: timeLimitEnabled,
       });
       info("Envio iniciado", "El envio anti-spam esta en marcha.");
       pollAntiSpamStatus();
@@ -781,11 +783,23 @@ export default function ExplorerPage() {
                 <div className="text-xs text-text-muted bg-white/5 rounded-lg p-3">
                   <strong>Protecciones anti-spam:</strong>
                   <ul className="mt-1 space-y-1 list-disc list-inside">
-                    <li>Horario: 9:00 a 21:00</li>
                     <li>Frecuencia: 20-40-50s alternando (nunca fija)</li>
-                    <li>Limite: 40-55 mensajes por franja horaria</li>
+                    <li>Ciclo: 50 mensajes → cooldown 20 min → 50 más</li>
                     <li>Sin numeros repetidos</li>
+                    {timeLimitEnabled && <li>Horario: 9:00 a 21:00</li>}
                   </ul>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 text-xs text-text-muted cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={timeLimitEnabled}
+                      onChange={(e) => setTimeLimitEnabled(e.target.checked)}
+                      className="w-4 h-4 rounded border-glass-border bg-bg-primary text-accent-gold focus:ring-accent-gold/30"
+                    />
+                    Limitar horario (9:00 - 21:00)
+                  </label>
                 </div>
 
                 <button
@@ -836,8 +850,8 @@ export default function ExplorerPage() {
                     <div className="text-text-muted">Restantes</div>
                   </div>
                   <div className="bg-white/5 rounded-lg p-2 text-center">
-                    <div className="text-blue-400 font-bold">{antiSpamStatus.chat_limit}</div>
-                    <div className="text-text-muted">Limite chat</div>
+                    <div className="text-blue-400 font-bold">Lote #{antiSpamStatus.batch_number}</div>
+                    <div className="text-text-muted">{antiSpamStatus.batch_count}/{antiSpamStatus.batch_limit}</div>
                   </div>
                   <div className="bg-white/5 rounded-lg p-2 text-center">
                     <div className="text-purple-400 font-bold">{antiSpamStatus.sent_phones_count}</div>
@@ -845,9 +859,24 @@ export default function ExplorerPage() {
                   </div>
                 </div>
 
-                <div className="text-xs text-text-muted mb-3">{antiSpamStatus.hour_status}</div>
+                {/* Cooldown status */}
+                {antiSpamStatus.cooldown_remaining != null && antiSpamStatus.cooldown_remaining > 0 && (
+                  <div className="bg-blue-500/10 border border-blue-500/25 rounded-lg p-3 mb-3">
+                    <div className="flex items-center gap-2 text-sm text-blue-300">
+                      <span className="animate-pulse">⏸</span>
+                      Cooldown activo — retoma en {Math.ceil(antiSpamStatus.cooldown_remaining / 60)} min {Math.round(antiSpamStatus.cooldown_remaining % 60)}s
+                    </div>
+                    <div className="text-xs text-text-muted mt-1">
+                      Lote #{antiSpamStatus.batch_number} completado. Siguiente lote en breve.
+                    </div>
+                  </div>
+                )}
 
-                {antiSpamStatus.next_send_in != null && (
+                {antiSpamStatus.time_limit_enabled && (
+                  <div className="text-xs text-text-muted mb-3">{antiSpamStatus.hour_status}</div>
+                )}
+
+                {antiSpamStatus.cooldown_remaining == null && antiSpamStatus.next_send_in != null && (
                   <div className="text-xs text-text-muted mb-2">
                     Proximo envio en: {Math.round(antiSpamStatus.next_send_in)}s
                   </div>

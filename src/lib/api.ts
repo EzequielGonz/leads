@@ -491,9 +491,14 @@ export interface BatchAntiSpamStatus {
     barrio: string;
     progress: string;
   } | null;
-  chat_limit: number;
+  batch_count: number;
+  batch_number: number;
+  batch_limit: number;
+  cooldown_remaining: number | null;
+  cooldown_minutes: number;
   error: string | null;
   completed: boolean;
+  time_limit_enabled: boolean;
   elapsed: number;
   next_send_in: number | null;
   log: Array<{ time: string; message: string; level: string }>;
@@ -506,6 +511,7 @@ export async function startAntiSpamBatch(payload: {
   template_name: string;
   template_language?: string;
   template_variables?: string;
+  time_limit_enabled?: boolean;
 }): Promise<{ ok: boolean; message: string }> {
   return api.post("/batch/start", payload);
 }
