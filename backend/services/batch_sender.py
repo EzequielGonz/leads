@@ -24,6 +24,7 @@ from services.database import (
     load_leads_for_file,
     save_whatsapp_store,
     load_whatsapp_store,
+    delete_lead_by_phone,
 )
 from services.whatsapp_service import (
     send_template_message,
@@ -342,6 +343,12 @@ def _worker(file_id: str, template_name: str, template_language: str,
                             message_type="template", preview=f"Plantilla {template_name}",
                             status="accepted", template_name=template_name,
                         )
+                        # Delete lead from DB so it doesn't appear again
+                        try:
+                            delete_lead_by_phone(phone)
+                            _state.add_log(f"🗑 Lead eliminado de la lista: {nombre} ({phone})")
+                        except Exception as del_err:
+                            _state.add_log(f"⚠️ No se pudo eliminar lead: {del_err}", "warn")
                     else:
                         _state.failed_count += 1
                         _state.add_log(f"❌ Error enviando a {phone}", "error")

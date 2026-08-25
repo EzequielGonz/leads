@@ -346,6 +346,19 @@ def delete_leads_for_file(file_id):
     _commit(conn)
 
 
+def delete_lead_by_phone(phone_number):
+    """Elimina un lead por número de teléfono."""
+    if not phone_number:
+        return
+    conn = _get_conn()
+    pg = _use_pg()
+    if pg:
+        _execute(conn, "DELETE FROM leads WHERE data->>'telefono' = %s", (phone_number,))
+    else:
+        _execute(conn, "DELETE FROM leads WHERE json_extract(data, '$.telefono') = ?", (phone_number,))
+    _commit(conn)
+
+
 def find_lead_by_phone(normalized_phone):
     """Busca un lead por teléfono en la DB (sin cargar todos)."""
     return find_lead_by_phone_fast(normalized_phone)
