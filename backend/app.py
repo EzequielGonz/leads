@@ -372,6 +372,24 @@ def upload_status(file_id):
                 "sheet_names": file_entry.get("sheet_names"),
             })
         return _make_json_error("Upload no encontrado", 404)
+    # If status is stuck at "processing" but leads exist in DB, mark as done
+    if status["status"] == "processing" and status.get("processed", 0) > 0:
+        real_count = count_leads(file_id)
+        if real_count >= status["processed"]:
+            status["status"] = "done"
+            status["total_rows"] = real_count
+            status["processed"] = real_count
+            # Also save file to files_store if not there
+            if not any(f["id"] == file_id for f in files_store):
+                files_store.insert(0, {
+                    "id": file_id,
+                    "filename": status.get("filename", "unknown"),
+                    "total_rows": real_count,
+                    "columns_detected": status.get("columns", []),
+                    "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                    "sheet_names": status.get("sheet_names"),
+                })
+                _save_store_data()
     return jsonify({
         "file_id": file_id,
         "status": status["status"],
@@ -387,6 +405,58 @@ def upload_status(file_id):
 @app.route("/api/files", methods=["GET"])
 def list_files():
     try:
+        # Always try to load from DB first
+        db_files = []
+        try:
+            db_files = load_files()
+        except Exception:
+            pass
+
+        # If DB has files, use those
+        if db_files:
+            files_store.clear()
+            files_store.extend(db_files)
+        elif not files_store:
+            # Fallback: reconstruct file info from leads table
+            try:
+                conn = None
+                from services.database import _get_conn, _fetchall, _use_pg
+                conn = _get_conn()
+                pg = _use_pg()
+                placeholder = "%s" if pg else "?"
+                rows = _fetchall(conn,
+                    f"SELECT file_id, MIN(created_at) as uploaded_at, COUNT(*) as total "
+                    f"FROM leads WHERE file_id IS NOT NULL AND file_id != '' "
+                    f"GROUP BY file_id ORDER BY uploaded_at DESC"
+                )
+                for row in rows:
+                    fid = row["file_id"]
+                    # Try to get filename from a sample lead
+                    sample = _fetchall(conn,
+                        f"SELECT data FROM leads WHERE file_id = {placeholder} LIMIT 1",
+                        (fid,)
+                    )
+                    filename = "unknown.xlsx"
+                    columns_detected = []
+                    if sample:
+                        lead_data = json.loads(sample[0]["data"])
+                        filename = lead_data.get("source_file", "unknown.xlsx")
+                    # Reconstruct file info
+                    file_info = {
+                        "id": fid,
+                        "filename": filename,
+                        "total_rows": row["total"],
+                        "columns_detected": columns_detected,
+                        "uploaded_at": row["uploaded_at"],
+                        "sheet_names": None,
+                    }
+                    files_store.append(file_info)
+                # Save reconstructed files to DB for next time
+                if files_store:
+                    save_files(files_store)
+            except Exception:
+                traceback.print_exc()
+
         safe_files = []
         for f in files_store:
             sf = dict(f)
