@@ -892,10 +892,14 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                                     except Exception:
                                         pass
 
-                            # Extract text from both text messages and interactive button replies
+                            # Extract text from text, button, and interactive messages
                             inbound_text = None
                             if message.get("type") == "text":
                                 inbound_text = message.get("text", {}).get("body")
+                            elif message.get("type") == "button":
+                                # WhatsApp button click: type='button', text in button.text or button.payload
+                                btn = message.get("button") or {}
+                                inbound_text = btn.get("text") or btn.get("payload") or None
                             elif message.get("type") == "interactive":
                                 interactive = message.get("interactive") or {}
                                 button_reply = interactive.get("button_reply") or {}
