@@ -16,6 +16,7 @@ export interface Lead {
   linkedin?: string;
   website?: string;
   ubicacion?: string;
+  barrio?: string;
   lesion?: string;
   es_argentina: boolean;
   tipo_perfil?: LeadTipo;
@@ -72,6 +73,7 @@ export interface LeadsQueryParams {
   search?: string;
   argentina_only?: boolean | "true" | "1";
   tipo?: string;
+  barrio?: string;
   ubicacion?: string;
   page?: number;
   size?: number;

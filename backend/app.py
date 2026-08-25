@@ -145,6 +145,7 @@ def _filter_leads(
     argentina_only=None,
     tipo=None,
     ubicacion=None,
+    barrio=None,
     file_id=None,
 ):
     result = []
@@ -156,6 +157,12 @@ def _filter_leads(
             tipos = [t.strip() for t in tipo.split(",") if t.strip()]
             if tipos and l.get("tipo_perfil") not in tipos:
                 continue
+        if barrio:
+            barrios = [b.strip().lower() for b in barrio.split(",") if b.strip()]
+            if barrios:
+                lead_barrio = (l.get("barrio") or "").lower()
+                if not any(b in lead_barrio for b in barrios):
+                    continue
         if ubicacion:
             ubicaciones = [u.strip().lower() for u in ubicacion.split(",") if u.strip()]
             if ubicaciones:

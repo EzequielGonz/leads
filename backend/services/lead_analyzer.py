@@ -368,6 +368,7 @@ def process_row(raw_row, column_mapping=None):
         "linkedin": "",
         "website": "",
         "ubicacion": "",
+        "barrio": "",
         "lesion": "",
         "es_argentina": False,
         "tipo_perfil": None,
@@ -408,6 +409,14 @@ def process_row(raw_row, column_mapping=None):
             _, mloc = detect_argentina(v)
             if mloc:
                 lead["ubicacion"] = mloc
+                break
+
+    # Extract barrio from LOCALIDAD field in raw_data
+    for key in raw_row:
+        if key and "localidad" in str(key).lower():
+            val = str(raw_row[key]).strip()
+            if val and val.lower() not in ("", "nan", "none"):
+                lead["barrio"] = val
                 break
 
     tipo, categorias = detect_profile_type(combined_text)

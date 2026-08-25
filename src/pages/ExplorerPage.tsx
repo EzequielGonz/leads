@@ -41,7 +41,6 @@ import {
   type BatchStatus,
   type FileInfo,
   type Lead,
-  type LeadTipo,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -61,33 +60,6 @@ const UBICACIONES_OPT = [
   "Corrientes",
   "Neuquén",
 ];
-
-const TIPOS_OPT: LeadTipo[] = [
-  "abogado",
-  "contador",
-  "medico",
-  "empresa",
-  "sin_clasificar",
-  "otro",
-];
-
-const TIPO_LABEL: Record<LeadTipo, string> = {
-  abogado: "Abogado / Estudio Jurídico",
-  contador: "Contador / Estudio Contable",
-  medico: "Médico / Profesional Salud",
-  empresa: "Empresa / Emprendedor",
-  sin_clasificar: "Sin clasificar",
-  otro: "Otro",
-};
-
-const TIPO_ICONS: Record<LeadTipo, React.ElementType> = {
-  abogado: Scale,
-  contador: Calculator,
-  medico: Stethoscope,
-  empresa: Building2,
-  sin_clasificar: User,
-  otro: Users,
-};
 
 function formatDate(iso?: string) {
   if (!iso) return "";
@@ -175,7 +147,7 @@ export default function ExplorerPage() {
       files.map((f) => f.id).join("|"),
       searchDebounced,
       filters.argentina_only,
-      filters.tipo,
+      filters.barrio,
       filters.ubicacion,
       lastImportTimestamp,
     ],
@@ -183,7 +155,7 @@ export default function ExplorerPage() {
       const base = {
         search: searchDebounced || undefined,
         argentina_only: filters.argentina_only,
-        tipo: filters.tipo,
+        barrio: filters.barrio,
         ubicacion: filters.ubicacion,
       };
       const byFile: Record<string, { leads: Lead[]; total: number }> = {};
@@ -227,7 +199,7 @@ export default function ExplorerPage() {
       await exportLeads(format, {
         search: searchDebounced,
         argentina_only: filters.argentina_only,
-        tipo: filters.tipo,
+        barrio: filters.barrio,
         ubicacion: filters.ubicacion,
       });
       success(
@@ -436,7 +408,7 @@ export default function ExplorerPage() {
 
   const hasActiveFilters =
     filters.argentina_only !== undefined ||
-    !!filters.tipo ||
+    !!filters.barrio ||
     !!filters.ubicacion ||
     !!searchDebounced;
 
@@ -566,16 +538,19 @@ export default function ExplorerPage() {
           <div>
             <select
               className="select-field"
-              value={filters.tipo ?? ""}
+              value={filters.barrio ?? ""}
               onChange={(e) =>
-                setFilters({ tipo: (e.target.value as LeadTipo) || undefined })
+                setFilters({ barrio: e.target.value || undefined })
               }
             >
-              <option value="">Tipo: Todos</option>
-              {TIPOS_OPT.map((t) => (
-                <option key={t} value={t}>
-                  {TIPO_LABEL[t]}
-                </option>
+              <option value="">Barrio: Todos</option>
+              {[...new Set(
+                Object.values(fileLeadsQuery.data ?? {})
+                  .flatMap((f) => f.leads)
+                  .map((l) => (l as any).barrio)
+                  .filter((b): b is string => !!b)
+              )].sort().map((b) => (
+                <option key={b} value={b}>{b}</option>
               ))}
             </select>
           </div>
@@ -603,7 +578,12 @@ export default function ExplorerPage() {
             <Filter className="w-3.5 h-3.5" />
             Activos:
             {filters.argentina_only && <ArgentinaBadge es_argentina={true} />}
-            {filters.tipo && <TipoBadge tipo={filters.tipo} />}
+            {filters.barrio && (
+              <span className="badge badge-default">
+                <MapPin className="w-3 h-3 text-accent-cyan" />
+                {filters.barrio}
+              </span>
+            )}
             {filters.ubicacion && (
               <span className="badge badge-default">
                 <MapPin className="w-3 h-3" />
