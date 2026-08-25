@@ -27,6 +27,7 @@ from services.database import (
 )
 from services.whatsapp_service import (
     send_template_message,
+    record_outbound_message,
 )
 
 
@@ -335,9 +336,21 @@ def _worker(file_id: str, template_name: str, template_language: str,
                         _state.sent_phones.add(normalized)
                         _state.last_send_time = time.time()
                         _state.add_log(f"✅ [{_state.batch_count}/{BATCH_LIMIT}] Enviado a {nombre} ({phone})")
+                        # Record outbound message in WhatsApp store
+                        record_outbound_message(
+                            lead=lead, phone_raw=phone, phone_e164=normalized,
+                            message_type="template", preview=f"Plantilla {template_name}",
+                            status="accepted", template_name=template_name,
+                        )
                     else:
                         _state.failed_count += 1
                         _state.add_log(f"❌ Error enviando a {phone}", "error")
+                        record_outbound_message(
+                            lead=lead, phone_raw=phone, phone_e164=normalized,
+                            message_type="template", preview=f"Plantilla {template_name}",
+                            status="failed", error_message="No response from API",
+                            template_name=template_name,
+                        )
 
                 except Exception as e:
                     _state.failed_count += 1
@@ -347,6 +360,12 @@ def _worker(file_id: str, template_name: str, template_language: str,
                         time.sleep(60)
                     else:
                         _state.add_log(f"❌ Error: {error_msg}", "error")
+                    record_outbound_message(
+                        lead=lead, phone_raw=phone, phone_e164=normalized,
+                        message_type="template", preview=f"Plantilla {template_name}",
+                        status="failed", error_message=error_msg,
+                        template_name=template_name,
+                    )
 
                 # Save sent phones periodically
                 if _state.sent_count % 5 == 0:

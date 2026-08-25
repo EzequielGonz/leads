@@ -334,6 +334,20 @@ def _append_message_record(store, message):
     del messages[:-5000]
 
 
+def record_outbound_message(lead, phone_raw, phone_e164, message_type, preview, status="accepted", error_message="", template_name=""):
+    """Public: record an outbound message in the WhatsApp store."""
+    record = _build_outbound_record(
+        lead=lead, campaign_id=None, phone_raw=phone_raw, phone_e164=phone_e164,
+        message_type=message_type, preview=preview, status=status,
+        error_message=error_message, template_name=template_name,
+    )
+
+    def _apply(store):
+        _append_message_record(store, record)
+
+    _mutate_store(_apply)
+
+
 def _append_campaign(store, campaign):
     campaigns = store.setdefault("campaigns", [])
     campaigns.insert(0, campaign)
@@ -366,6 +380,17 @@ def list_conversations(limit=50):
     grouped = {}
     for item in messages:
         phone = item.get("phone_e164") or item.get("phone_raw") or "sin_telefono"
+        direction = item.get("direction") or ""
+        # Skip pure Meta status callbacks — they are not real conversations
+        if direction == "status":
+            # Still update lead info if available
+            current = grouped.get(phone)
+            if current:
+                if item.get("lead_name"):
+                    current["lead_name"] = item["lead_name"]
+                if item.get("lead_id"):
+                    current["lead_id"] = item["lead_id"]
+            continue
         current = grouped.get(phone)
         if current is None:
             grouped[phone] = {
@@ -373,21 +398,23 @@ def list_conversations(limit=50):
                 "phone_e164": item.get("phone_e164") or "",
                 "lead_id": item.get("lead_id"),
                 "lead_name": item.get("lead_name") or item.get("contact_name") or "",
-                "last_direction": item.get("direction"),
+                "last_direction": direction,
                 "last_status": item.get("status"),
                 "last_preview": item.get("preview") or "",
                 "last_message_at": item.get("created_at"),
                 "messages_count": 1,
+                "error_message": item.get("error_message") or "",
             }
             continue
         current["messages_count"] += 1
         if (item.get("created_at") or "") > (current.get("last_message_at") or ""):
-            current["last_direction"] = item.get("direction")
+            current["last_direction"] = direction
             current["last_status"] = item.get("status")
             current["last_preview"] = item.get("preview") or ""
             current["last_message_at"] = item.get("created_at")
             current["lead_id"] = item.get("lead_id") or current.get("lead_id")
             current["lead_name"] = item.get("lead_name") or current.get("lead_name")
+            current["error_message"] = item.get("error_message") or current.get("error_message") or ""
     rows = list(grouped.values())
     rows.sort(key=lambda item: item.get("last_message_at") or "", reverse=True)
     return rows[:limit]
