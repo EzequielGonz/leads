@@ -631,10 +631,15 @@ def create_campaign(leads, payload):
                 raise WhatsAppServiceError("No se pudo normalizar el telefono del lead.")
 
             if message_type == "template":
-                rendered_vars = [
+                raw_vars = [
                     _render_text_template(item, lead)
                     for item in template_variables
                     if str(item).strip()
+                ]
+                # WhatsApp rejects newlines/tabs/4+ spaces in template params
+                rendered_vars = [
+                    re.sub(r" {4,}", "    ", v.replace("\r", "").replace("\n", " ").replace("\t", " ").strip())[:1024]
+                    for v in raw_vars
                 ]
                 preview = f"Plantilla {template_name} -> {', '.join(rendered_vars) if rendered_vars else 'sin variables'}"
                 response = send_template_message(

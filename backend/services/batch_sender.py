@@ -307,7 +307,18 @@ def _worker(file_id: str, template_name: str, template_language: str,
                 try:
                     nombre = lead.get("full_name") or lead.get("nombre", "Cliente")
                     variables = template_variables.replace("{{full_name}}", nombre)
-                    var_list = [v.strip() for v in variables.split("\\n") if v.strip()]
+                    # WhatsApp rejects newlines/tabs in template params.
+                    # Split on real newlines, collapse whitespace, and join.
+                    cleaned = " ".join(
+                        part.strip()
+                        for part in variables.replace("\r", "").split("\n")
+                        if part.strip()
+                    )
+                    # Collapse 4+ consecutive spaces down to 4
+                    import re as _re
+                    cleaned = _re.sub(r" {4,}", "    ", cleaned)
+                    # WhatsApp template params max ~1024 chars
+                    var_list = [cleaned[:1024]] if cleaned else []
 
                     result = send_template_message(
                         to_phone=phone,
