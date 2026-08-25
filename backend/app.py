@@ -229,6 +229,10 @@ def _process_file_background(file_id, save_path, ext, original_filename, sheet_n
         column_mapping = suggest_column_mapping(columns)
 
         for raw in rows_iter:
+            # Skip completely empty rows
+            if not raw or all((v is None or (isinstance(v, str) and not v.strip())) for v in raw.values()):
+                continue
+
             total_leads += 1
 
             if not mapping_detected:
@@ -257,6 +261,7 @@ def _process_file_background(file_id, save_path, ext, original_filename, sheet_n
                 # Update progress every chunk
                 with _upload_status_lock:
                     _upload_status[file_id]["processed"] = total_leads
+                    _upload_status[file_id]["total_rows"] = total_leads
 
         if not mapping_detected and sample_rows:
             if not column_mapping:
@@ -276,7 +281,7 @@ def _process_file_background(file_id, save_path, ext, original_filename, sheet_n
             "filename": original_filename,
             "saved_path": save_path,
             "sheet_name": sheet_name,
-            "sheet_names": None,
+            "sheet_names": sheet_names,
             "total_rows": total_leads,
             "columns_detected": list(columns),
             "uploaded_at": datetime.now(timezone.utc).isoformat(),
