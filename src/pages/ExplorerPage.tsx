@@ -38,7 +38,13 @@ import {
   startBatchSend,
   getBatchStatus,
   cancelBatchSend,
+  startAntiSpamBatch,
+  stopAntiSpamBatch,
+  pauseAntiSpamBatch,
+  resumeAntiSpamBatch,
+  getAntiSpamBatchStatus,
   type BatchStatus,
+  type BatchAntiSpamStatus,
   type FileInfo,
   type Lead,
 } from "@/lib/api";
@@ -125,6 +131,8 @@ export default function ExplorerPage() {
   const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null);
   const [batchLoading, setBatchLoading] = useState(false);
   const [showBatchPanel, setShowBatchPanel] = useState(false);
+  // Anti-spam batch
+  const [antiSpamStatus, setAntiSpamStatus] = useState<BatchAntiSpamStatus | null>(null);
 
   const { success, info, error } = useToast();
 
@@ -301,7 +309,73 @@ export default function ExplorerPage() {
         pollBatchStatus();
       }
     }).catch(() => {});
+    // Poll anti-spam status
+    pollAntiSpamStatus();
   }, []);
+
+  // Anti-spam handlers
+  const handleStartAntiSpam = async () => {
+    if (!batchFileId || !batchTemplateName) return;
+    try {
+      await startAntiSpamBatch({
+        file_id: batchFileId,
+        template_name: batchTemplateName,
+        template_language: "es_AR",
+        template_variables: "{{full_name}}\n[asesor]\n[estudio]",
+      });
+      info("Envio iniciado", "El envio anti-spam esta en marcha.");
+      pollAntiSpamStatus();
+    } catch (e: any) {
+      error("Error", e?.error || e?.message || "No se pudo iniciar.");
+    }
+  };
+
+  const handleStopAntiSpam = async () => {
+    try {
+      await stopAntiSpamBatch();
+      info("Detenido", "El envio fue detenido.");
+      const status = await getAntiSpamBatchStatus();
+      setAntiSpamStatus(status);
+    } catch (e: any) {
+      error("Error", e?.error || "No se pudo detener.");
+    }
+  };
+
+  const handlePauseAntiSpam = async () => {
+    try {
+      await pauseAntiSpamBatch();
+      info("Pausado", "El envio fue pausado.");
+      const status = await getAntiSpamBatchStatus();
+      setAntiSpamStatus(status);
+    } catch (e: any) {
+      error("Error", e?.error || "No se pudo pausar.");
+    }
+  };
+
+  const handleResumeAntiSpam = async () => {
+    try {
+      await resumeAntiSpamBatch();
+      info("Reanudado", "El envio continuo.");
+      pollAntiSpamStatus();
+    } catch (e: any) {
+      error("Error", e?.error || "No se pudo reanudar.");
+    }
+  };
+
+  const pollAntiSpamStatus = () => {
+    const poll = async () => {
+      try {
+        const status = await getAntiSpamBatchStatus();
+        setAntiSpamStatus(status);
+        if (status.active) {
+          setTimeout(poll, 3000);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    poll();
+  };
 
   const handleExportData = async () => {
     try {
@@ -641,12 +715,22 @@ export default function ExplorerPage() {
         </div>
       </section>
 
-      {/* Batch Send Section */}
+      {/* Anti-Spam Batch Send Section */}
       <section className="glass-card gradient-border-top p-4 sm:p-5 opacity-0 animate-stagger-2">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Send className="w-4 h-4 text-accent-gold" />
-            <h3 className="font-display font-semibold text-text-primary">Envio automatico de mensajes</h3>
+            <h3 className="font-display font-semibold text-text-primary">Envio Anti-Spam</h3>
+            {antiSpamStatus?.active && (
+              <span className="px-2 py-0.5 text-xs rounded-full bg-green-500/20 text-green-300 border border-green-500/30">
+                Activo
+              </span>
+            )}
+            {antiSpamStatus?.paused && (
+              <span className="px-2 py-0.5 text-xs rounded-full bg-yellow-500/20 text-yellow-300 border border-yellow-500/30">
+                Pausado
+              </span>
+            )}
           </div>
           <button
             onClick={() => setShowBatchPanel(!showBatchPanel)}
@@ -658,93 +742,169 @@ export default function ExplorerPage() {
 
         {showBatchPanel && (
           <div className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-text-muted mb-1 block">Archivo Excel</label>
-                <select
-                  className="input-field w-full"
-                  value={batchFileId}
-                  onChange={(e) => setBatchFileId(e.target.value)}
-                >
-                  <option value="">Seleccionar archivo...</option>
-                  {files.map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {f.filename || f.id} ({f.total_rows} filas)
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-text-muted mb-1 block">Plantilla</label>
-                <select
-                  className="input-field w-full"
-                  value={batchTemplateName}
-                  onChange={(e) => setBatchTemplateName(e.target.value)}
-                >
-                  <option value="">Seleccionar plantilla...</option>
-                  {(sendTemplates || []).map((t) => (
-                    <option key={t.name} value={t.name}>
-                      {t.name} ({t.status})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
+            {/* Config */}
+            {!antiSpamStatus?.active && (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-text-muted mb-1 block">Archivo Excel</label>
+                    <select
+                      className="input-field w-full"
+                      value={batchFileId}
+                      onChange={(e) => setBatchFileId(e.target.value)}
+                    >
+                      <option value="">Seleccionar archivo...</option>
+                      {files.map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.filename || f.id} ({f.total_rows} leads)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-text-muted mb-1 block">Plantilla</label>
+                    <select
+                      className="input-field w-full"
+                      value={batchTemplateName}
+                      onChange={(e) => setBatchTemplateName(e.target.value)}
+                    >
+                      <option value="">Seleccionar plantilla...</option>
+                      {(sendTemplates || []).map((t) => (
+                        <option key={t.name} value={t.name}>
+                          {t.name} ({t.status})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
 
-            <div className="text-xs text-text-muted bg-white/5 rounded-lg p-3">
-              <strong>Como funciona:</strong> El sistema envia un mensaje cada 20-40 segundos (con variacion aleatoria) para evitar restricciones de WhatsApp. No cierres esta pagina durante el envio.
-            </div>
+                <div className="text-xs text-text-muted bg-white/5 rounded-lg p-3">
+                  <strong>Protecciones anti-spam:</strong>
+                  <ul className="mt-1 space-y-1 list-disc list-inside">
+                    <li>Horario: 9:00 a 21:00</li>
+                    <li>Frecuencia: 20-40-50s alternando (nunca fija)</li>
+                    <li>Limite: 40-55 mensajes por franja horaria</li>
+                    <li>Sin numeros repetidos</li>
+                  </ul>
+                </div>
 
-            {batchStatus && batchStatus.running && (
+                <button
+                  onClick={handleStartAntiSpam}
+                  disabled={!batchFileId || !batchTemplateName}
+                  className="btn-primary text-sm"
+                >
+                  <Send className="w-4 h-4" />
+                  Iniciar envio anti-spam
+                </button>
+              </>
+            )}
+
+            {/* Active Status */}
+            {(antiSpamStatus?.active || antiSpamStatus?.paused) && (
               <div className="bg-accent-gold/10 border border-accent-gold/25 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium text-accent-gold">Enviando mensajes...</span>
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-sm font-medium text-accent-gold">
+                    {antiSpamStatus.paused ? "⏸ Pausado" : "📤 Enviando mensajes..."}
+                  </span>
                   <span className="text-xs text-text-muted">
-                    {batchStatus.sent} / {batchStatus.total} enviados
-                    {batchStatus.failed > 0 && ` · ${batchStatus.failed} fallidos`}
+                    {antiSpamStatus.sent_count} / {antiSpamStatus.total_leads} enviados
+                    {antiSpamStatus.failed_count > 0 && ` · ${antiSpamStatus.failed_count} fallidos`}
                   </span>
                 </div>
-                <div className="w-full bg-white/10 rounded-full h-2 mb-2">
+
+                <div className="w-full bg-white/10 rounded-full h-2 mb-3">
                   <div
                     className="bg-accent-gold h-2 rounded-full transition-all duration-500"
-                    style={{ width: `${((batchStatus.sent + batchStatus.failed) / batchStatus.total) * 100}%` }}
+                    style={{ width: `${((antiSpamStatus.sent_count + antiSpamStatus.failed_count) / Math.max(1, antiSpamStatus.total_leads)) * 100}%` }}
                   />
                 </div>
-                {batchStatus.current_name && (
-                  <div className="text-xs text-text-muted">
-                    Enviando a: {batchStatus.current_name} ({batchStatus.current_phone})
+
+                {antiSpamStatus.current_lead && (
+                  <div className="text-xs text-text-muted mb-2">
+                    Enviando a: <strong>{antiSpamStatus.current_lead.nombre}</strong> ({antiSpamStatus.current_lead.telefono})
+                    {antiSpamStatus.current_lead.barrio && ` · ${antiSpamStatus.current_lead.barrio}`}
                   </div>
                 )}
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs mb-3">
+                  <div className="bg-white/5 rounded-lg p-2 text-center">
+                    <div className="text-accent-gold font-bold">{antiSpamStatus.sent_count}</div>
+                    <div className="text-text-muted">Enviados</div>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-2 text-center">
+                    <div className="text-green-400 font-bold">{antiSpamStatus.remaining}</div>
+                    <div className="text-text-muted">Restantes</div>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-2 text-center">
+                    <div className="text-blue-400 font-bold">{antiSpamStatus.chat_limit}</div>
+                    <div className="text-text-muted">Limite chat</div>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-2 text-center">
+                    <div className="text-purple-400 font-bold">{antiSpamStatus.sent_phones_count}</div>
+                    <div className="text-text-muted">Numeros unicos</div>
+                  </div>
+                </div>
+
+                <div className="text-xs text-text-muted mb-3">{antiSpamStatus.hour_status}</div>
+
+                {antiSpamStatus.next_send_in != null && (
+                  <div className="text-xs text-text-muted mb-2">
+                    Proximo envio en: {Math.round(antiSpamStatus.next_send_in)}s
+                  </div>
+                )}
+
+                {/* Log */}
+                {antiSpamStatus.log && antiSpamStatus.log.length > 0 && (
+                  <div className="bg-black/20 rounded-lg p-2 max-h-32 overflow-y-auto mb-3">
+                    {antiSpamStatus.log.slice(-10).reverse().map((entry, i) => (
+                      <div key={i} className={`text-xs ${entry.level === 'error' ? 'text-red-400' : entry.level === 'warn' ? 'text-yellow-400' : 'text-text-muted'}`}>
+                        {entry.message}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  {!antiSpamStatus.paused ? (
+                    <button
+                      onClick={handlePauseAntiSpam}
+                      className="text-xs py-1.5 px-3 rounded-lg bg-yellow-500/10 border border-yellow-500/25 text-yellow-300 hover:bg-yellow-500/20 transition-colors"
+                    >
+                      ⏸ Pausar
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleResumeAntiSpam}
+                      className="text-xs py-1.5 px-3 rounded-lg bg-green-500/10 border border-green-500/25 text-green-300 hover:bg-green-500/20 transition-colors"
+                    >
+                      ▶ Reanudar
+                    </button>
+                  )}
+                  <button
+                    onClick={handleStopAntiSpam}
+                    className="text-xs py-1.5 px-3 rounded-lg bg-red-500/10 border border-red-500/25 text-red-300 hover:bg-red-500/20 transition-colors"
+                  >
+                    ⏹ Detener
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Completed */}
+            {antiSpamStatus?.completed && (
+              <div className="bg-green-500/10 border border-green-500/25 rounded-lg p-4">
+                <div className="text-sm font-medium text-green-300">✅ Envio completado</div>
+                <div className="text-xs text-text-muted mt-1">
+                  {antiSpamStatus.sent_count} enviados · {antiSpamStatus.failed_count} fallidos
+                </div>
                 <button
-                  onClick={handleCancelBatch}
-                  className="mt-2 text-xs py-1 px-3 rounded-lg bg-red-500/10 border border-red-500/25 text-red-300 hover:bg-red-500/20 transition-colors"
+                  onClick={() => setAntiSpamStatus(null)}
+                  className="mt-2 text-xs py-1 px-3 rounded-lg bg-white/5 border border-white/10 text-text-muted hover:bg-white/10 transition-colors"
                 >
-                  Cancelar envio
+                  Limpiar
                 </button>
               </div>
             )}
-
-            {batchStatus && !batchStatus.running && batchStatus.total > 0 && (
-              <div className="bg-green-500/10 border border-green-500/25 rounded-lg p-4">
-                <div className="text-sm font-medium text-green-300">Envio completado</div>
-                <div className="text-xs text-text-muted mt-1">
-                  {batchStatus.sent} enviados · {batchStatus.failed} fallidos · {batchStatus.file_name}
-                </div>
-              </div>
-            )}
-
-            <button
-              onClick={handleStartBatch}
-              disabled={!batchFileId || !batchTemplateName || batchLoading || (batchStatus?.running ?? false)}
-              className="btn-primary text-sm"
-            >
-              {batchLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Send className="w-4 h-4" />
-              )}
-              Iniciar envio automatico
-            </button>
           </div>
         )}
       </section>

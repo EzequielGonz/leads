@@ -1068,6 +1068,86 @@ def whatsapp_webhook_receive():
         return _make_json_error(f"Error procesando webhook: {str(e)}", 500)
 
 
+@app.route("/api/batch/start", methods=["POST"])
+def batch_start():
+    try:
+        data = request.get_json(force=True)
+        file_id = data.get("file_id")
+        template_name = data.get("template_name", "")
+        template_language = data.get("template_language", "es_AR")
+        template_variables = data.get("template_variables", "")
+        if not file_id or not template_name:
+            return _make_json_error("Se requiere file_id y template_name", 400)
+        from services.batch_sender import start_batch
+        result = start_batch(file_id, template_name, template_language, template_variables)
+        if "error" in result:
+            return _make_json_error(result["error"], 400)
+        return jsonify(result)
+    except Exception as e:
+        traceback.print_exc()
+        return _make_json_error(f"Error: {str(e)}", 500)
+
+
+@app.route("/api/batch/stop", methods=["POST"])
+def batch_stop():
+    try:
+        from services.batch_sender import stop_batch
+        result = stop_batch()
+        if "error" in result:
+            return _make_json_error(result["error"], 400)
+        return jsonify(result)
+    except Exception as e:
+        traceback.print_exc()
+        return _make_json_error(f"Error: {str(e)}", 500)
+
+
+@app.route("/api/batch/pause", methods=["POST"])
+def batch_pause():
+    try:
+        from services.batch_sender import pause_batch
+        result = pause_batch()
+        if "error" in result:
+            return _make_json_error(result["error"], 400)
+        return jsonify(result)
+    except Exception as e:
+        traceback.print_exc()
+        return _make_json_error(f"Error: {str(e)}", 500)
+
+
+@app.route("/api/batch/resume", methods=["POST"])
+def batch_resume():
+    try:
+        from services.batch_sender import resume_batch
+        result = resume_batch()
+        if "error" in result:
+            return _make_json_error(result["error"], 400)
+        return jsonify(result)
+    except Exception as e:
+        traceback.print_exc()
+        return _make_json_error(f"Error: {str(e)}", 500)
+
+
+@app.route("/api/batch/status", methods=["GET"])
+def batch_status():
+    try:
+        from services.batch_sender import get_batch_status
+        return jsonify(get_batch_status())
+    except Exception as e:
+        traceback.print_exc()
+        return _make_json_error(f"Error: {str(e)}", 500)
+
+
+@app.route("/api/batch/clear-history", methods=["POST"])
+def batch_clear_history():
+    try:
+        from services.batch_sender import clear_sent_history
+        result = clear_sent_history()
+        return jsonify(result)
+    except Exception as e:
+        traceback.print_exc()
+        return _make_json_error(f"Error: {str(e)}", 500)
+
+
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({

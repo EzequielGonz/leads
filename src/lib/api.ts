@@ -475,4 +475,59 @@ export async function cancelBatchSend(): Promise<{ ok: boolean; message: string 
   return api.post("/whatsapp/batch-cancel");
 }
 
+// --- Anti-spam batch sender ---
+export interface BatchAntiSpamStatus {
+  active: boolean;
+  paused: boolean;
+  file_id: string | null;
+  template_name: string;
+  total_leads: number;
+  sent_count: number;
+  failed_count: number;
+  remaining: number;
+  current_lead: {
+    nombre: string;
+    telefono: string;
+    barrio: string;
+    progress: string;
+  } | null;
+  chat_limit: number;
+  error: string | null;
+  completed: boolean;
+  elapsed: number;
+  next_send_in: number | null;
+  log: Array<{ time: string; message: string; level: string }>;
+  sent_phones_count: number;
+  hour_status: string;
+}
+
+export async function startAntiSpamBatch(payload: {
+  file_id: string;
+  template_name: string;
+  template_language?: string;
+  template_variables?: string;
+}): Promise<{ ok: boolean; message: string }> {
+  return api.post("/batch/start", payload);
+}
+
+export async function stopAntiSpamBatch(): Promise<{ ok: boolean; message: string }> {
+  return api.post("/batch/stop");
+}
+
+export async function pauseAntiSpamBatch(): Promise<{ ok: boolean; message: string }> {
+  return api.post("/batch/pause");
+}
+
+export async function resumeAntiSpamBatch(): Promise<{ ok: boolean; message: string }> {
+  return api.post("/batch/resume");
+}
+
+export async function getAntiSpamBatchStatus(): Promise<BatchAntiSpamStatus> {
+  return api.get("/batch/status");
+}
+
+export async function clearBatchHistory(): Promise<{ ok: boolean; message: string }> {
+  return api.post("/batch/clear-history");
+}
+
 export default api;
