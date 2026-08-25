@@ -6,6 +6,7 @@ import { useToast } from "@/components/Toast";
 import {
   uploadFile,
   getUploadStatus,
+  getLeads,
   suggestColumns,
   type Lead,
   type FileImportResult,
@@ -101,13 +102,20 @@ export default function UploadPage() {
           const status = await getUploadStatus(fileId);
           if (status.status === "done") {
             done = true;
+            // Load first few leads for preview
+            let previewLeads: Lead[] = [];
+            try {
+              const leadsRes = await getLeads({ file_id: fileId, page: 1, size: 5 });
+              previewLeads = leadsRes.data || [];
+            } catch {}
+
             const finalResult: FileImportResult = {
               file_id: fileId,
               filename: result.filename,
               total_rows: status.total_rows,
               columns_detected: status.columns,
-              leads: [],
-              preview_rows: [],
+              leads: previewLeads,
+              preview_rows: previewLeads,
               sheet_names: status.sheet_names,
             };
             setProcessedResult(finalResult);
