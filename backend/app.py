@@ -1149,27 +1149,6 @@ def batch_clear_history():
         return _make_json_error(f"Error: {str(e)}", 500)
 
 
-@app.route("/api/leads/bulk-delete", methods=["POST"])
-def bulk_delete_leads():
-    """Delete leads by phone numbers (temporary endpoint for cleanup)."""
-    try:
-        data = request.get_json(silent=True) or {}
-        phones = data.get("phones") or []
-        if not phones:
-            return jsonify({"error": "No phones provided"}), 400
-        from services.database import delete_lead_by_phone
-        deleted = 0
-        for phone in phones:
-            try:
-                delete_lead_by_phone(phone)
-                deleted += 1
-            except Exception:
-                pass
-        return jsonify({"ok": True, "deleted": deleted, "total": len(phones)})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({
