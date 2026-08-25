@@ -190,13 +190,24 @@ def detect_profile_type(row_text):
 
 def _default_column_mapping(columns):
     mapping = {}
+    # Columns that are NEVER phones (CUIT/CUIL/DNI look like phones but aren't)
+    _EXCLUDE_PHONE = ["cuil", "cuit", "dni", "documento", "cuit/cuil", "cuil/cuit",
+                      "cod postal", "codigo postal", "c.postal", "cpostal"]
+    _PHONE_FIRST = []  # columns found as phone (MOVIL, CELULAR, etc.)
+
     for col in columns:
-        low = str(col or "").lower()
+        low = str(col or "").lower().strip()
         if low in mapping.values():
             continue
+
+        # Exclude CUIL/CUIL/DNI from ever being mapped as phone
+        if any(ex in low for ex in _EXCLUDE_PHONE):
+            continue
+
         if any(k in low for k in ["correo", "email", "e-mail", "mail"]):
             mapping[col] = "email"
-        elif any(k in low for k in ["telefono", "teléfono", "tel ", "tel:", "celular", "phone", "whatsapp", "numero", "número"]):
+        elif any(k in low for k in ["movil", "móvil", "celular", "telefono", "teléfono",
+                                    "tel ", "tel:", "phone", "whatsapp", "numero"]):
             mapping[col] = "telefono"
         elif any(k in low for k in ["instagram", "ig", "inst "]):
             mapping[col] = "instagram"
@@ -210,6 +221,8 @@ def _default_column_mapping(columns):
             mapping[col] = "apellido"
         elif any(k in low for k in ["nombre", "firstname", "first name", "name"]) and "completo" not in low:
             mapping[col] = "nombre"
+        elif any(k in low for k in ["localidad", "barrio", "locality", "neighborhood"]):
+            mapping[col] = "barrio"
         elif any(k in low for k in ["ubicacion", "ubicación", "ciudad", "pais", "país", "location", "lugar", "provincia"]):
             mapping[col] = "ubicacion"
         elif any(k in low for k in ["bio", "biography", "descripcion", "descripción", "acerca", "about"]):
@@ -387,9 +400,31 @@ def process_row(raw_row, column_mapping=None):
     all_values = [v for v in raw_row.values() if v not in (None, "")]
     combined_text = " ".join(str(v) for v in all_values)
 
-    if not lead["email"]:
-        lead["email"] = extract_email(combined_text) or ""
-    if not lead["telefono"]:
+    # Smart phone detection: prefer MOVIL/CELULAR columns, skip CUIL/CUIT/DNI
+    _EXCLUDE_PHONE_KEYS = ["cuil", "cuit", "dni", "documento"]
+    _PHONE_KEYS = ["movil", "móvil", "celular", "telefono", "teléfono",
+                   "tel", "phone", "whatsapp", "numero", "número"]
+    best_phone = ""
+    for col_name in raw_row:
+        low_col = str(col_name or "").lower().strip()
+        val = raw_row.get(col_name)
+        if val in (None, ""):
+            continue
+        val_str = str(val).strip()
+        if not val_str:
+            continue
+        # Skip CUIL/CUIT/DNI columns
+        if any(x in low_col for x in _EXCLUDE_PHONE_KEYS):
+            continue
+        # Check if column name suggests phone
+        if any(k in low_col for k in _PHONE_KEYS):
+            digits = re.sub(r"\D", "", val_str)
+            if 8 <= len(digits) <= 15:
+                if not best_phone:
+                    best_phone = val_str
+    if best_phone:
+        lead["telefono"] = best_phone
+    elif not lead["telefono"]:
         lead["telefono"] = extract_phone(combined_text) or ""
     if not lead["instagram"]:
         lead["instagram"] = extract_instagram(combined_text) or ""
