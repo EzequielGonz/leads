@@ -347,31 +347,19 @@ def delete_leads_for_file(file_id):
 
 
 def delete_lead_by_phone(phone_number):
-    """Elimina un lead por número de teléfono (acepta varios formatos)."""
+    """Elimina un lead por número de teléfono (LIKE search on JSON data)."""
     if not phone_number:
         return
+    digits = ''.join(c for c in str(phone_number) if c.isdigit())
+    if len(digits) < 8:
+        return
+    last8 = digits[-8:]
     conn = _get_conn()
     pg = _use_pg()
-    # Generate possible formats: with/without leading 0, with/without country code
-    digits = ''.join(c for c in str(phone_number) if c.isdigit())
-    formats = set()
-    formats.add(digits)
-    formats.add(digits.lstrip('0'))
-    if not digits.startswith('0'):
-        formats.add('0' + digits)
-    # With country code variations
-    if digits.startswith('54'):
-        formats.add(digits[2:])  # without 54
-        formats.add('0' + digits[2:])  # with leading 0, without 54
-    elif not digits.startswith('0'):
-        formats.add('54' + digits)
-        formats.add('0' + digits)
     if pg:
-        conditions = ' OR '.join(["data->>'telefono' = %s"] * len(formats))
-        _execute(conn, f"DELETE FROM leads WHERE {conditions}", tuple(formats))
+        _execute(conn, "DELETE FROM leads WHERE data LIKE %s", (f'%{last8}%',))
     else:
-        conditions = ' OR '.join(["json_extract(data, '$.telefono') = ?"] * len(formats))
-        _execute(conn, f"DELETE FROM leads WHERE {conditions}", tuple(formats))
+        _execute(conn, "DELETE FROM leads WHERE data LIKE ?", (f'%{last8}%',))
     _commit(conn)
 
 
