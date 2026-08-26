@@ -47,14 +47,14 @@ DEFAULT_MENU_QUESTIONS = [
         "id": "antiguedad",
         "question": "📋 Pregunta 1: ¿Cuánto tiempo de antiguedad tiene tu caso?",
         "options": [
-            {"value": "1", "label": "Menos de 1 año"},
-            {"value": "2", "label": "De 1 a 5 años"},
-            {"value": "3", "label": "Más de 5 años"}
+            {"value": "1", "label": "Menos de 1 a\u00f1o"},
+            {"value": "2", "label": "De 1 a 5 a\u00f1os"},
+            {"value": "3", "label": "M\u00e1s de 5 a\u00f1os"}
         ]
     },
     {
         "id": "lugar",
-        "question": "📋 Pregunta 2: ¿Dónde ocurrió el accidente?",
+        "question": "📋 Pregunta 2: ¿D\u00f3nde ocurri\u00f3 el accidente?",
         "options": [
             {"value": "1", "label": "En el lugar de trabajo"},
             {"value": "2", "label": "En el camino al trabajo"},
@@ -62,15 +62,15 @@ DEFAULT_MENU_QUESTIONS = [
         ]
     },
     {
-        "id": "horario",
-        "question": "📋 Pregunta 3: 📅 Que día y horario te quedaría cómodo para una consulta con un profesional?\nLa consulta tiene el fin de analizar con más detalle tu caso y poder brindarte el mejor asesoramiento integral.\nLa consulta no tiene costo y es completamente sin compromiso.",
+        "id": "lesion",
+        "question": "📋 Pregunta 3: \U0001fa7a ¿Qu\u00e9 lesi\u00f3n o problema de salud te gener\u00f3 el accidente laboral?\n\n¿Segu\u00eds en tratamiento?",
         "options": [],
         "free_text": True,
         "required": True
     },
     {
-        "id": "lesion",
-        "question": "📋 Pregunta 4: 🩺 ¿Qué lesión o problema de salud te generó el accidente laboral?",
+        "id": "horario",
+        "question": "📋 Pregunta 4: \U0001f4c5 ¿Que d\u00eda y horario te quedar\u00eda c\u00f3modo para una consulta con un profesional?\n\nLa consulta tiene el fin de analizar con m\u00e1s detalle tu caso y poder brindarte el mejor asesoramiento integral.\nLa consulta no tiene costo y es completamente sin compromiso.\nTrabajamos de lunes a viernes de 9 a 18hs.\n\n(Por favor, escribir tu respuesta en el siguiente formato: 10/5/2026 17:30hs)",
         "options": [],
         "free_text": True,
         "required": True
@@ -143,15 +143,15 @@ def _build_menu_q2(questions):
 
 
 def _build_menu_q3(questions):
-    """Construye el mensaje de la pregunta 3 (texto libre)."""
+    """Construye el mensaje de la pregunta 3 (lesion - texto libre)."""
     q = questions[2]
     return f"{q['question']}\n\n(Escribí tu respuesta)"
 
 
 def _build_menu_q4(questions):
-    """Construye el mensaje de la pregunta 4 (texto libre)."""
+    """Construye el mensaje de la pregunta 4 (horario - texto libre)."""
     q = questions[3]
-    return f"{q['question']}\n\n(Escribí tu respuesta)"
+    return f"{q['question']}"
 
 
 def _build_menu_completion(conv, config):
