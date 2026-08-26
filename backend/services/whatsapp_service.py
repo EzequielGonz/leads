@@ -1,3 +1,4 @@
+import time
 import json
 import os
 import re
@@ -328,10 +329,23 @@ def _record_event(store, kind, payload):
     del events[:-100]
 
 
+# Dedup: track last inbound message per phone to avoid double-processing
+_last_inbound = {}  # phone -> (text, timestamp)
+_LAST_INBOUND_MAX_AGE = 8  # seconds
+
 def _append_message_record(store, message):
     messages = store.setdefault("messages", [])
     messages.append(message)
     del messages[:-5000]
+
+def _is_duplicate_inbound(phone, text):
+    """Check if same message was already processed recently."""
+    now = time.time()
+    last = _last_inbound.get(phone)
+    if last and last[0] == text and (now - last[1]) < _LAST_INBOUND_MAX_AGE:
+        return True
+    _last_inbound[phone] = (text, now)
+    return False
 
 
 def record_outbound_message(lead, phone_raw, phone_e164, message_type, preview, status="accepted", error_message="", template_name=""):
