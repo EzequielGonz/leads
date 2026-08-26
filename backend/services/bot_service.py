@@ -92,15 +92,12 @@ _ENV_MAP = {
 
 
 def get_menu_config(config):
-    """Obtiene la configuración del menú numérico."""
-    menu_enabled = str(config.get("bot_menu_enabled")).strip().lower() in (
-        "1", "true", "yes", "si", "sí", "on",
-    )
+    """Obtiene la configuración del menú numérico. Siempre está activo."""
     intro = str(config.get("bot_menu_intro") or "").strip()
     questions = config.get("bot_menu_questions") or DEFAULT_MENU_QUESTIONS
     
     return {
-        "enabled": menu_enabled,
+        "enabled": True,
         "intro": intro,
         "questions": questions
     }

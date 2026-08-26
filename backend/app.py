@@ -1061,10 +1061,23 @@ def whatsapp_batch_cancel():
 def whatsapp_webhook_receive():
     try:
         payload = request.get_json(silent=True) or {}
-        # Use DB search instead of loading all leads into memory
+        # Log the raw payload for debugging
+        import logging as _wl
+        entries = payload.get("entry", [])
+        for entry in entries:
+            for change in entry.get("changes", []):
+                val = change.get("value", {})
+                for msg in val.get("messages", []):
+                    _wl.warning("WEBHOOK_RAW type=%s from=%s keys=%s", msg.get("type"), msg.get("from"), list(msg.keys()))
+                    if msg.get("type") == "interactive":
+                        _wl.warning("WEBHOOK_INTERACTIVE %s", msg.get("interactive"))
+                    elif msg.get("type") == "button":
+                        _wl.warning("WEBHOOK_BUTTON %s", msg.get("button"))
         result = process_webhook(payload, [], find_lead_fn=find_lead_by_phone_fast)
         return jsonify({"received": True, **result})
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return _make_json_error(f"Error procesando webhook: {str(e)}", 500)
 
 

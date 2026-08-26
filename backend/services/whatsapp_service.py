@@ -869,17 +869,30 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                         # Extract text from text, button, and interactive messages
                         # (must be done BEFORE conv check, because new users may click buttons)
                         inbound_text = None
-                        if message.get("type") == "text":
+                        raw_msg_type = message.get("type") or "unknown"
+                        if raw_msg_type == "text":
                             inbound_text = message.get("text", {}).get("body")
-                        elif message.get("type") == "button":
-                            # WhatsApp button click: type='button'
+                        elif raw_msg_type == "button":
                             btn = message.get("button") or {}
                             inbound_text = btn.get("text") or btn.get("payload") or None
-                        elif message.get("type") == "interactive":
+                        elif raw_msg_type == "interactive":
                             interactive = message.get("interactive") or {}
                             button_reply = interactive.get("button_reply") or {}
                             list_reply = interactive.get("list_reply") or {}
                             inbound_text = button_reply.get("title") or list_reply.get("title") or None
+                        else:
+                            # Fallback: try every possible field
+                            for key, subkey in [("button","text"),("button","payload"),("interactive","button_reply"),("text","body")]:
+                                obj = message.get(key) or {}
+                                if isinstance(obj, dict):
+                                    val = obj.get(subkey)
+                                    if isinstance(val, dict):
+                                        val = val.get("title") or val.get("id")
+                                    if val:
+                                        inbound_text = str(val)
+                                        break
+                        import logging as _log
+                        _log.warning("WEBHOOK_INBOUND msg_type=%s inbound_text=%r from=%s", raw_msg_type, inbound_text, phone_e164)
 
                         # If no conversation exists yet, create one when bot is active and menu is enabled
                         if not conv and menu_cfg.get("enabled"):
@@ -890,12 +903,10 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                                 lead_id=lead.get("id") if lead else None,
                                 lead_name=lead.get("full_name") or (lead.get("name") if lead else None) or contact.get("profile", {}).get("name") or "",
                             )
-                            # New conversation starts in menu_awaiting_choice stage
                             conv["stage"] = "menu_awaiting_choice"
                             conv["updated_at"] = _utc_now()
 
                         if conv and not conv.get("closed"):
-                            # Si el menú está activo y no se envió aún, enviar el mensaje inicial (2 opciones)
                             if menu_cfg.get("enabled") and not conv.get("data", {}).get("menu_sent"):
                                 menu_msg = _build_menu_initial_message(bot_cfg)
                                 if menu_msg:
@@ -923,7 +934,8 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
 
                             try:
                                 replies = bot_handle_inbound(conv, inbound_text, bot_cfg, lead or None)
-                            except Exception:
+                            except Exception as e:
+                                _log.error("BOT_HANDLE_ERROR phone=%s text=%r err=%s", phone_e164, inbound_text, e)
                                 replies = []
                             for body in replies:
                                 try:
