@@ -63,15 +63,15 @@ DEFAULT_MENU_QUESTIONS = [
         ]
     },
     {
-        "id": "lesion",
-        "question": "📋 Pregunta 3: \U0001fa7a ¿Qu\u00e9 lesi\u00f3n o problema de salud te gener\u00f3 el accidente laboral?\n\n¿Segu\u00eds en tratamiento?",
+        "id": "horario",
+        "question": "📋 Pregunta 3: \U0001f4c5 ¿Que d\u00eda y horario te quedar\u00eda c\u00f3modo para una consulta con un profesional?\n\nLa consulta tiene el fin de analizar con m\u00e1s detalle tu caso y poder brindarte el mejor asesoramiento integral.\nLa consulta no tiene costo y es completamente sin compromiso.\nTrabajamos de lunes a viernes de 9 a 18hs.\n\n(Por favor, escribir tu respuesta en el siguiente formato: 10/5/2026 17:30hs)",
         "options": [],
         "free_text": True,
         "required": True
     },
     {
-        "id": "horario",
-        "question": "📋 Pregunta 4: \U0001f4c5 ¿Que d\u00eda y horario te quedar\u00eda c\u00f3modo para una consulta con un profesional?\n\nLa consulta tiene el fin de analizar con m\u00e1s detalle tu caso y poder brindarte el mejor asesoramiento integral.\nLa consulta no tiene costo y es completamente sin compromiso.\nTrabajamos de lunes a viernes de 9 a 18hs.\n\n(Por favor, escribir tu respuesta en el siguiente formato: 10/5/2026 17:30hs)",
+        "id": "lesion",
+        "question": "📋 Pregunta 4: \U0001fa7a ¿Qu\u00e9 lesi\u00f3n o problema de salud te gener\u00f3 el accidente laboral?\n\n¿Segu\u00eds en tratamiento?",
         "options": [],
         "free_text": True,
         "required": True
