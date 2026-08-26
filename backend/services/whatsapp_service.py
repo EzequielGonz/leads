@@ -329,9 +329,23 @@ def _record_event(store, kind, payload):
     del events[:-100]
 
 
-# Dedup: track last inbound message per phone to avoid double-processing
-_last_inbound = {}  # phone -> (text, timestamp)
-_LAST_INBOUND_MAX_AGE = 8  # seconds
+# Dedup: track processed message IDs to avoid webhook retries
+_processed_msg_ids = set()
+_MAX_PROCESSED_IDS = 500
+
+def _is_duplicate_msg(msg_id):
+    """Check if this WhatsApp message ID was already processed."""
+    if not msg_id:
+        return False
+    if msg_id in _processed_msg_ids:
+        return True
+    _processed_msg_ids.add(msg_id)
+    if len(_processed_msg_ids) > _MAX_PROCESSED_IDS:
+        # Trim old entries
+        to_remove = list(_processed_msg_ids)[:_MAX_PROCESSED_IDS // 2]
+        for item in to_remove:
+            _processed_msg_ids.discard(item)
+    return False
 
 def _append_message_record(store, message):
     messages = store.setdefault("messages", [])
@@ -896,6 +910,11 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                                             break
                                 if inbound_text:
                                     break
+
+                        # Skip duplicate webhook retries (same WhatsApp message ID)
+                        msg_id = message.get("id") or ""
+                        if msg_id and _is_duplicate_msg(msg_id):
+                            continue
 
                         # Create or reopen conversation when bot+menu is active
                         if menu_cfg.get("enabled") and (not conv or conv.get("closed")):
