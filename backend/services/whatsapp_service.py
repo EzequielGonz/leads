@@ -916,22 +916,21 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                         if msg_id and _is_duplicate_msg(msg_id):
                             continue
 
-                        # Create or reopen conversation when bot+menu is active
-                        if menu_cfg.get("enabled") and (not conv or conv.get("closed")):
-                            if not conv:
-                                conv = bot_ensure_conversation(
-                                    store,
-                                    phone_e164=phone_e164,
-                                    phone_raw=raw_from,
-                                    lead_id=lead.get("id") if lead else None,
-                                    lead_name=lead.get("full_name") or (lead.get("name") if lead else None) or contact.get("profile", {}).get("name") or "",
-                                )
-                            conv["closed"] = False
-                            conv["close_reason"] = None
-                            conv["closed_at"] = None
+                        # If conversation is already closed (bot finished), don't restart
+                        if conv and conv.get("closed"):
+                            continue
+
+                        # Create new conversation when bot+menu is active and none exists
+                        if menu_cfg.get("enabled") and not conv:
+                            conv = bot_ensure_conversation(
+                                store,
+                                phone_e164=phone_e164,
+                                phone_raw=raw_from,
+                                lead_id=lead.get("id") if lead else None,
+                                lead_name=lead.get("full_name") or (lead.get("name") if lead else None) or contact.get("profile", {}).get("name") or "",
+                            )
                             conv["stage"] = "menu_q1"
                             conv.setdefault("data", {})["menu_current_question"] = 0
-                            conv.setdefault("data", {})["menu_sent"] = True
                             conv["updated_at"] = _utc_now()
 
                         if conv and not conv.get("closed"):
