@@ -895,16 +895,26 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                         _log.warning("WEBHOOK_INBOUND msg_type=%s inbound_text=%r from=%s", raw_msg_type, inbound_text, phone_e164)
 
                         # If no conversation exists yet, create one when bot is active and menu is enabled
-                        if not conv and menu_cfg.get("enabled"):
-                            conv = bot_ensure_conversation(
-                                store,
-                                phone_e164=phone_e164,
-                                phone_raw=raw_from,
-                                lead_id=lead.get("id") if lead else None,
-                                lead_name=lead.get("full_name") or (lead.get("name") if lead else None) or contact.get("profile", {}).get("name") or "",
-                            )
-                            conv["stage"] = "menu_awaiting_choice"
-                            conv["updated_at"] = _utc_now()
+                        # If no conversation exists, or the old one is closed, create/reset it
+                        if menu_cfg.get("enabled") and (not conv or conv.get("closed")):
+                            if conv and conv.get("closed"):
+                                conv["closed"] = False
+                                conv["close_reason"] = None
+                                conv["closed_at"] = None
+                                conv["stage"] = "menu_awaiting_choice"
+                                conv["data"] = {}
+                                conv["replies_count"] = 0
+                                conv["updated_at"] = _utc_now()
+                            elif not conv:
+                                conv = bot_ensure_conversation(
+                                    store,
+                                    phone_e164=phone_e164,
+                                    phone_raw=raw_from,
+                                    lead_id=lead.get("id") if lead else None,
+                                    lead_name=lead.get("full_name") or (lead.get("name") if lead else None) or contact.get("profile", {}).get("name") or "",
+                                )
+                                conv["stage"] = "menu_awaiting_choice"
+                                conv["updated_at"] = _utc_now()
 
                         if conv and not conv.get("closed"):
                             if menu_cfg.get("enabled") and not conv.get("data", {}).get("menu_sent"):
