@@ -45,11 +45,12 @@ DEFAULT_BOT_CONFIG = {
 DEFAULT_MENU_QUESTIONS = [
     {
         "id": "antiguedad",
-        "question": "📋 Pregunta 1: ¿Cuánto tiempo de antiguedad tiene tu caso?",
+        "question": "📋 Pregunta 1: \u00bfHace cu\u00e1nto tiempo ocurri\u00f3 tu accidente laboral?",
         "options": [
-            {"value": "1", "label": "Menos de 1 a\u00f1o"},
-            {"value": "2", "label": "De 1 a 5 a\u00f1os"},
-            {"value": "3", "label": "M\u00e1s de 5 a\u00f1os"}
+            {"value": "1", "label": "Menos de 6 meses"},
+            {"value": "2", "label": "Entre 6 meses y 1 a\u00f1o"},
+            {"value": "3", "label": "Entre 1 y 2 a\u00f1os"},
+            {"value": "4", "label": "M\u00e1s de 2 a\u00f1os"}
         ]
     },
     {
