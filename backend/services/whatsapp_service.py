@@ -864,8 +864,37 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                     bot_cfg = bot_get_config(store)
                     if bot_cfg.get("bot_enabled"):
                         conv = (store.get("bot_conversations") or {}).get(phone_e164)
+                        menu_cfg = bot_get_menu_config(bot_cfg)
+
+                        # Extract text from text, button, and interactive messages
+                        # (must be done BEFORE conv check, because new users may click buttons)
+                        inbound_text = None
+                        if message.get("type") == "text":
+                            inbound_text = message.get("text", {}).get("body")
+                        elif message.get("type") == "button":
+                            # WhatsApp button click: type='button'
+                            btn = message.get("button") or {}
+                            inbound_text = btn.get("text") or btn.get("payload") or None
+                        elif message.get("type") == "interactive":
+                            interactive = message.get("interactive") or {}
+                            button_reply = interactive.get("button_reply") or {}
+                            list_reply = interactive.get("list_reply") or {}
+                            inbound_text = button_reply.get("title") or list_reply.get("title") or None
+
+                        # If no conversation exists yet, create one when bot is active and menu is enabled
+                        if not conv and menu_cfg.get("enabled"):
+                            conv = bot_ensure_conversation(
+                                store,
+                                phone_e164=phone_e164,
+                                phone_raw=raw_from,
+                                lead_id=lead.get("id") if lead else None,
+                                lead_name=lead.get("full_name") or (lead.get("name") if lead else None) or contact.get("profile", {}).get("name") or "",
+                            )
+                            # New conversation starts in menu_awaiting_choice stage
+                            conv["stage"] = "menu_awaiting_choice"
+                            conv["updated_at"] = _utc_now()
+
                         if conv and not conv.get("closed"):
-                            menu_cfg = bot_get_menu_config(bot_cfg)
                             # Si el menú está activo y no se envió aún, enviar el mensaje inicial (2 opciones)
                             if menu_cfg.get("enabled") and not conv.get("data", {}).get("menu_sent"):
                                 menu_msg = _build_menu_initial_message(bot_cfg)
@@ -892,19 +921,6 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                                     except Exception:
                                         pass
 
-                            # Extract text from text, button, and interactive messages
-                            inbound_text = None
-                            if message.get("type") == "text":
-                                inbound_text = message.get("text", {}).get("body")
-                            elif message.get("type") == "button":
-                                # WhatsApp button click: type='button', text in button.text or button.payload
-                                btn = message.get("button") or {}
-                                inbound_text = btn.get("text") or btn.get("payload") or None
-                            elif message.get("type") == "interactive":
-                                interactive = message.get("interactive") or {}
-                                button_reply = interactive.get("button_reply") or {}
-                                list_reply = interactive.get("list_reply") or {}
-                                inbound_text = button_reply.get("title") or list_reply.get("title") or None
                             try:
                                 replies = bot_handle_inbound(conv, inbound_text, bot_cfg, lead or None)
                             except Exception:
