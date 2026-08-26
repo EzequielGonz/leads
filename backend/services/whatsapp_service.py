@@ -860,7 +860,6 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                         menu_cfg = bot_get_menu_config(bot_cfg)
 
                         # Extract text from text, button, and interactive messages
-                        # (must be done BEFORE conv check, because new users may click buttons)
                         inbound_text = None
                         raw_msg_type = message.get("type") or "unknown"
                         if raw_msg_type == "text":
@@ -873,33 +872,20 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                             button_reply = interactive.get("button_reply") or {}
                             list_reply = interactive.get("list_reply") or {}
                             inbound_text = button_reply.get("title") or list_reply.get("title") or None
-                        else:
-                            # Fallback: try every possible field
-                            for key, subkey in [("button","text"),("button","payload"),("interactive","button_reply"),("text","body")]:
-                                obj = message.get(key) or {}
+                        if not inbound_text:
+                            for obj in [message, message.get("button"), message.get("interactive")]:
                                 if isinstance(obj, dict):
-                                    val = obj.get(subkey)
-                                    if isinstance(val, dict):
-                                        val = val.get("title") or val.get("id")
-                                    if val:
-                                        inbound_text = str(val)
-                                        break
-                        import logging as _log
-                        _log.warning("WEBHOOK_INBOUND msg_type=%s inbound_text=%r from=%s", raw_msg_type, inbound_text, phone_e164)
+                                    for k in ("text", "payload", "title", "id", "body"):
+                                        v = obj.get(k)
+                                        if isinstance(v, str) and len(v) > 0:
+                                            inbound_text = v
+                                            break
+                                if inbound_text:
+                                    break
 
                         # Create or reopen conversation when bot+menu is active
                         if menu_cfg.get("enabled") and (not conv or conv.get("closed")):
-                            if conv and conv.get("closed"):
-                                # Reopened: go to awaiting_choice so user's text triggers Q1
-                                conv["closed"] = False
-                                conv["close_reason"] = None
-                                conv["closed_at"] = None
-                                conv["stage"] = "menu_awaiting_choice"
-                                conv["data"] = {}
-                                conv["replies_count"] = 0
-                                conv["updated_at"] = _utc_now()
-                            elif not conv:
-                                # Brand new conversation: go directly to Q1
+                            if not conv:
                                 conv = bot_ensure_conversation(
                                     store,
                                     phone_e164=phone_e164,
@@ -907,9 +893,13 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                                     lead_id=lead.get("id") if lead else None,
                                     lead_name=lead.get("full_name") or (lead.get("name") if lead else None) or contact.get("profile", {}).get("name") or "",
                                 )
-                                conv["stage"] = "menu_q1"
-                                conv.setdefault("data", {})["menu_current_question"] = 0
-                                conv["updated_at"] = _utc_now()
+                            conv["closed"] = False
+                            conv["close_reason"] = None
+                            conv["closed_at"] = None
+                            conv["stage"] = "menu_q1"
+                            conv.setdefault("data", {})["menu_current_question"] = 0
+                            conv.setdefault("data", {})["menu_sent"] = True
+                            conv["updated_at"] = _utc_now()
 
                         if conv and not conv.get("closed"):
                             try:

@@ -1251,23 +1251,8 @@ def _handle_menu_flow(conv, text, config, lead, menu_config):
     questions = menu_config["questions"]
     stage = conv.get("stage")
 
-    # --- Etapa: enviar mensaje inicial con 2 opciones ---
-    if stage in ("awaiting_status", "menu_start"):
-        _set_stage(conv, "menu_awaiting_choice")
-        return [_build_menu_initial_message(config)]
-
-    # --- Etapa: esperar elección (1=resuelto, 2=pendiente) ---
-    if stage == "menu_awaiting_choice":
-        t = _norm(text)
-        is_resuelto = (
-            t == "1"
-            or "resuelto" in t or "resolv" in t or "solucion" in t
-            or "arregl" in t or "cierre" in t or ("ya esta" in t and "resuelto" in t)
-        )
-        if is_resuelto:
-            _finalize(conv, "caso_resuelto")
-            return ["Entiendo, gracias por responder. Si tu caso ya esta resuelto, no continuaremos contactandote. Exitos!"]
-        # Cualquier otra respuesta (pendiente, texto libre, etc) -> ir directo a preguntas
+    # --- Etapa legacy: siempre ir directo a preguntas ---
+    if stage in ("awaiting_status", "menu_start", "menu_awaiting_choice"):
         d["menu_current_question"] = 0
         _set_stage(conv, "menu_q1")
         intro = _build_menu_intro()
