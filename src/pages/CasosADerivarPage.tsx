@@ -104,6 +104,20 @@ export default function CasosADerivarPage() {
                       <span className="text-text-primary font-medium">{conv.data.menu_lesion}</span>
                     </div>
                   )}
+                  {conv.data.barrio && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <MapPin className="w-4 h-4 text-text-muted" />
+                      <span className="text-text-muted">Barrio:</span>
+                      <span className="text-text-primary font-medium">{conv.data.barrio}</span>
+                    </div>
+                  )}
+                  {conv.data.ubicacion && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <MapPin className="w-4 h-4 text-text-muted" />
+                      <span className="text-text-muted">Localidad:</span>
+                      <span className="text-text-primary font-medium">{conv.data.ubicacion}</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

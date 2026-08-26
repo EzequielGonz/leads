@@ -931,6 +931,15 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                             )
                             conv["stage"] = "menu_q1"
                             conv.setdefault("data", {})["menu_current_question"] = 0
+                            # Save lead location info for 'Casos a Derivar'
+                            if lead:
+                                ld = lead.get("data", lead) or {}
+                                barrio = ld.get("barrio") or ""
+                                ubicacion = ld.get("ubicacion") or ""
+                                if barrio:
+                                    conv.setdefault("data", {})["barrio"] = barrio
+                                if ubicacion:
+                                    conv.setdefault("data", {})["ubicacion"] = ubicacion
                             conv["updated_at"] = _utc_now()
 
                         if conv and not conv.get("closed"):
