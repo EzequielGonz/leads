@@ -63,7 +63,7 @@ DEFAULT_MENU_QUESTIONS = [
     },
     {
         "id": "horario",
-        "question": "📋 Pregunta 3: 📅 ¿Qué día y horario te viene bien para una reunión con un profesional?",
+        "question": "📋 Pregunta 3: 📅 Que día y horario te quedaría cómodo para una consulta con un profesional?\nLa consulta tiene el fin de analizar con más detalle tu caso y poder brindarte el mejor asesoramiento integral.\nLa consulta no tiene costo y es completamente sin compromiso.",
         "options": [],
         "free_text": True,
         "required": True
