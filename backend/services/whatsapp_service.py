@@ -551,7 +551,9 @@ def send_test_message(payload):
 
 
 def _send_bot_menu_after_template(to_phone, lead_name="", lead_id=""):
-    """Si el bot menú está activo, crea la conversación y envía el menú después de un template."""
+    """Si el bot menú está activo, crea la conversación después de un template.
+    No envía el menú automáticamente — el usuario responde con "mi caso esta pendiente"
+    y el bot arranca directo con las preguntas."""
     def _apply(store):
         bot_cfg = bot_get_config(store)
         if not bot_cfg.get("bot_enabled"):
@@ -568,18 +570,9 @@ def _send_bot_menu_after_template(to_phone, lead_name="", lead_id=""):
             lead_id=lead_id,
             lead_name=lead_name,
         )
-
-        # Construir y enviar el menú inicial (2 opciones)
-        menu_cfg = bot_get_menu_config(bot_cfg)
-        if menu_cfg.get("enabled"):
-            menu_msg = _build_menu_initial_message(bot_cfg)
-            if menu_msg:
-                send_text_message(to_phone, menu_msg)
-                # Marcar que el menú fue enviado
-                conv.setdefault("data", {})["menu_sent"] = True
-                conv.setdefault("data", {})["menu_current_question"] = 0
-                conv["stage"] = "menu_awaiting_choice"
-                conv["updated_at"] = _utc_now()
+        conv["stage"] = "menu_awaiting_choice"
+        conv.setdefault("data", {})["menu_current_question"] = 0
+        conv["updated_at"] = _utc_now()
 
     _mutate_store(_apply)
 
@@ -894,10 +887,10 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                         import logging as _log
                         _log.warning("WEBHOOK_INBOUND msg_type=%s inbound_text=%r from=%s", raw_msg_type, inbound_text, phone_e164)
 
-                        # If no conversation exists yet, create one when bot is active and menu is enabled
-                        # If no conversation exists, or the old one is closed, create/reset it
+                        # Create or reopen conversation when bot+menu is active
                         if menu_cfg.get("enabled") and (not conv or conv.get("closed")):
                             if conv and conv.get("closed"):
+                                # Reopened: go to awaiting_choice so user's text triggers Q1
                                 conv["closed"] = False
                                 conv["close_reason"] = None
                                 conv["closed_at"] = None
@@ -906,6 +899,7 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                                 conv["replies_count"] = 0
                                 conv["updated_at"] = _utc_now()
                             elif not conv:
+                                # Brand new conversation: go directly to Q1
                                 conv = bot_ensure_conversation(
                                     store,
                                     phone_e164=phone_e164,
@@ -913,35 +907,11 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                                     lead_id=lead.get("id") if lead else None,
                                     lead_name=lead.get("full_name") or (lead.get("name") if lead else None) or contact.get("profile", {}).get("name") or "",
                                 )
-                                conv["stage"] = "menu_awaiting_choice"
+                                conv["stage"] = "menu_q1"
+                                conv.setdefault("data", {})["menu_current_question"] = 0
                                 conv["updated_at"] = _utc_now()
 
                         if conv and not conv.get("closed"):
-                            if menu_cfg.get("enabled") and not conv.get("data", {}).get("menu_sent"):
-                                menu_msg = _build_menu_initial_message(bot_cfg)
-                                if menu_msg:
-                                    try:
-                                        send_text_message(phone_e164, menu_msg)
-                                        conv.setdefault("data", {})["menu_sent"] = True
-                                        conv.setdefault("data", {})["menu_current_question"] = 0
-                                        conv["stage"] = "menu_awaiting_choice"
-                                        conv["updated_at"] = _utc_now()
-                                        _append_message_record(
-                                            store,
-                                            _build_outbound_record(
-                                                lead=lead,
-                                                campaign_id=None,
-                                                phone_raw=raw_from,
-                                                phone_e164=phone_e164,
-                                                message_type="text",
-                                                preview=menu_msg[:100],
-                                                status="accepted",
-                                            ),
-                                        )
-                                        results["bot_replies_sent"] = results.get("bot_replies_sent", 0) + 1
-                                    except Exception:
-                                        pass
-
                             try:
                                 replies = bot_handle_inbound(conv, inbound_text, bot_cfg, lead or None)
                             except Exception as e:

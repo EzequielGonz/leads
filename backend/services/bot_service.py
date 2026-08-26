@@ -1257,26 +1257,17 @@ def _handle_menu_flow(conv, text, config, lead, menu_config):
         is_resuelto = (
             t == "1"
             or "resuelto" in t or "resolv" in t or "solucion" in t
-            or "arregl" in t or "cierre" in t or "ya esta" in t and "resuelto" in t
+            or "arregl" in t or "cierre" in t or ("ya esta" in t and "resuelto" in t)
         )
-        is_pendiente = (
-            t == "2"
-            or "pendiente" in t or "no lo resolv" in t or "no lo solucion" in t
-            or "todavia no" in t or "aun no" in t
-        )
-        if is_resuelto and not is_pendiente:
-            # Caso resuelto -> cerrar
+        if is_resuelto:
             _finalize(conv, "caso_resuelto")
-            return ["Entiendo, gracias por responder. Si tu caso ya está resuelto, no continuaremos contactándote. ¡Éxitos!"]
-        elif is_pendiente:
-            # Caso pendiente -> enviar intro y primera pregunta
-            d["menu_current_question"] = 0
-            _set_stage(conv, "menu_q1")
-            intro = _build_menu_intro()
-            q1_msg = _build_menu_q1(questions)
-            return [intro, q1_msg]
-        else:
-            return ["Perdón, no entendí.\n\nPor favor respondé con:\n1 - Mi caso ya está resuelto\n2 - Mi caso está pendiente"]
+            return ["Entiendo, gracias por responder. Si tu caso ya esta resuelto, no continuaremos contactandote. Exitos!"]
+        # Cualquier otra respuesta (pendiente, texto libre, etc) -> ir directo a preguntas
+        d["menu_current_question"] = 0
+        _set_stage(conv, "menu_q1")
+        intro = _build_menu_intro()
+        q1_msg = _build_menu_q1(questions)
+        return [intro, q1_msg]
 
     # --- Etapa: preguntas 1 a 4 ---
     menu_stages = ["menu_q1", "menu_q2", "menu_q3", "menu_q4"]
