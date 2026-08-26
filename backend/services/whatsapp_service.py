@@ -897,13 +897,6 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                                 if inbound_text:
                                     break
 
-                        if not inbound_text:
-                            continue
-
-                        # Skip duplicate messages (webhook retries)
-                        if _is_duplicate_inbound(phone_e164, inbound_text):
-                            continue
-
                         # Create or reopen conversation when bot+menu is active
                         if menu_cfg.get("enabled") and (not conv or conv.get("closed")):
                             if not conv:
