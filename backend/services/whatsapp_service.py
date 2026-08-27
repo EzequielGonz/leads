@@ -919,7 +919,7 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                         # If conversation is already closed, reopen it when menu is active
                         if conv and conv.get("closed") and menu_cfg.get("enabled"):
                             conv["closed"] = False
-                            conv["stage"] = "menu_q1"
+                            conv["stage"] = "menu_awaiting_choice"
                             conv["close_reason"] = None
                             conv.setdefault("data", {})["menu_current_question"] = 0
                             conv["updated_at"] = _utc_now()
@@ -935,7 +935,7 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                                 lead_id=lead.get("id") if lead else None,
                                 lead_name=lead.get("full_name") or (lead.get("name") if lead else None) or contact.get("profile", {}).get("name") or "",
                             )
-                            conv["stage"] = "menu_q1"
+                            conv["stage"] = "menu_awaiting_choice"
                             conv.setdefault("data", {})["menu_current_question"] = 0
                             # Save lead location info for 'Casos a Derivar'
                             if lead:
