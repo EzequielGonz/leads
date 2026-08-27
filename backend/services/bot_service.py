@@ -183,6 +183,7 @@ def _build_case_summary_for_professionals(conv, config):
     lugar = data.get("menu_lugar_label") or data.get("menu_lugar") or "No respondido"
     horario = data.get("menu_horario") or "No respondido"
     lesion = data.get("menu_lesion") or "No respondido"
+    tratamiento = data.get("menu_tratamiento") or "No especificado"
     
     summary = chr(128203) + " *NUEVO CASO A DERIVAR*" + chr(10) + chr(10)
     summary += chr(128100) + " *Nombre:* " + nombre + chr(10)
@@ -193,7 +194,8 @@ def _build_case_summary_for_professionals(conv, config):
     summary += "   " + chr(9200) + " Antiguedad: " + antiguedad + chr(10)
     summary += "   " + chr(128205) + " Lugar del accidente: " + lugar + chr(10)
     summary += "   " + chr(128197) + " Horario disponible: " + horario + chr(10)
-    summary += "   " + chr(129658) + " Lesion: " + lesion + chr(10) + chr(10)
+    summary += "   " + chr(129658) + " Lesion: " + lesion + chr(10)
+    summary += "   " + chr(129658) + " Tratamiento: " + tratamiento + chr(10) + chr(10)
     summary += "---" + chr(10)
     summary += "Este caso requiere atencion profesional."
     return summary
@@ -842,6 +844,7 @@ def _public_conversation(conv):
             "menu_lugar_label": data.get("menu_lugar_label") or data.get("menu_lugar") or "",
             "menu_horario": data.get("menu_horario") or "",
             "menu_lesion": data.get("menu_lesion") or "",
+            "menu_tratamiento": data.get("menu_tratamiento") or "",
             "barrio": data.get("barrio") or "",
             "ubicacion": data.get("ubicacion") or "",
         },
@@ -1342,6 +1345,15 @@ def _handle_menu_flow(conv, text, config, lead, menu_config):
         else:
             # Texto libre
             d[f"menu_{current_q['id']}"] = text.strip()
+            # Detectar estado de tratamiento de la respuesta de lesion (Q3)
+            if current_q.get("id") == "lesion":
+                t_lower = text.strip().lower()
+                if any(w in t_lower for w in ["si", "sí", "sigo", "tratamiento", "tratandome", "en tratamiento"]):
+                    d["menu_tratamiento"] = "Si, en tratamiento"
+                elif any(w in t_lower for w in ["no", "alta", "curado", "ya no", "suspendido"]):
+                    d["menu_tratamiento"] = "No"
+                else:
+                    d["menu_tratamiento"] = text.strip()
 
         # Avanzar
         next_idx = current_idx + 1

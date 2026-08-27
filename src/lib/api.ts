@@ -231,6 +231,7 @@ export interface WhatsAppBotConversation {
     menu_lugar_label?: string;
     menu_horario?: string;
     menu_lesion?: string;
+    menu_tratamiento?: string;
     barrio?: string;
     ubicacion?: string;
   };

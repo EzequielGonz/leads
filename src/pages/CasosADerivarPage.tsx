@@ -104,6 +104,13 @@ export default function CasosADerivarPage() {
                       <span className="text-text-primary font-medium">{conv.data.menu_lesion}</span>
                     </div>
                   )}
+                  {conv.data.menu_tratamiento && (
+                    <div className="flex items-center gap-2 text-sm sm:col-span-2">
+                      <HeartPulse className="w-4 h-4 text-text-muted" />
+                      <span className="text-text-muted">Tratamiento:</span>
+                      <span className="text-text-primary font-medium">{conv.data.menu_tratamiento}</span>
+                    </div>
+                  )}
                   {conv.data.barrio && (
                     <div className="flex items-center gap-2 text-sm">
                       <MapPin className="w-4 h-4 text-text-muted" />
