@@ -1343,11 +1343,8 @@ def _handle_menu_flow(conv, text, config, lead, menu_config):
         if next_idx >= len(questions):
             # Todas las preguntas respondidas -> cierre
             _finalize(conv, "menu_completado")
-            # Notificar a profesionales del caso nuevo
-            try:
-                notify_professionals(conv, config)
-            except Exception as e:
-                print(f"[BOT] Error notificando profesionales: {e}")
+            # Flag: caller should send notification OUTSIDE the lock
+            conv["_notify_professionals"] = True
             return [_build_menu_completion(conv, config)]
 
         # Enviar siguiente pregunta
