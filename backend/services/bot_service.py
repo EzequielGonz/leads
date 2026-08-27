@@ -1307,8 +1307,14 @@ def _handle_menu_flow(conv, text, config, lead, menu_config):
     questions = menu_config["questions"]
     stage = conv.get("stage")
 
-    # --- Etapa legacy: siempre ir directo a preguntas ---
+    # --- Etapa inicial: verificar resuelto/pendiente antes de mandar preguntas ---
     if stage in ("awaiting_status", "menu_start", "menu_awaiting_choice"):
+        t = (text or "").strip().lower()
+        # Si dice resuelto, cerrar conversacion
+        if "resuelto" in t or "ya " in t or t == "1":
+            _finalize(conv, "resuelto")
+            return ["Entendido, gracias por tu respuesta. Si tu caso esta resuelto, no hace falta que continúes. Si necesitas ayuda en el futuro, escribinos de nuevo."]
+        # Si dice pendiente, ir directo a preguntas
         d["menu_current_question"] = 0
         _set_stage(conv, "menu_q1")
         intro = _build_menu_intro()
