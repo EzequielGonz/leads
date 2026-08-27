@@ -948,11 +948,17 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                                 conv["updated_at"] = _utc_now()
 
                         if conv and not conv.get("closed"):
-                            try:
-                                replies = bot_handle_inbound(conv, inbound_text, bot_cfg, lead or None)
-                            except Exception as e:
-                                _log.error("BOT_HANDLE_ERROR phone=%s text=%r err=%s", phone_e164, inbound_text, e)
+                            # SAFETY: Only send bot replies if phone exists in leads DB
+                            # This prevents sending messages to random/test numbers
+                            if not lead and not (conv.get("lead_id") or ""):
+                                _log.warning("BOT_SKIP_NO_LEAD phone=%s - not in leads DB", phone_e164)
                                 replies = []
+                            else:
+                                try:
+                                    replies = bot_handle_inbound(conv, inbound_text, bot_cfg, lead or None)
+                                except Exception as e:
+                                    _log.error("BOT_HANDLE_ERROR phone=%s text=%r err=%s", phone_e164, inbound_text, e)
+                                    replies = []
                             for body in replies:
                                 try:
                                     send_text_message(phone_e164, body)

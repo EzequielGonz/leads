@@ -1316,7 +1316,7 @@ def _handle_menu_flow(conv, text, config, lead, menu_config):
         # Si dice resuelto, cerrar conversacion
         if "resuelto" in t or "ya " in t or t == "1":
             _finalize(conv, "resuelto")
-            return ["Entendido, gracias por tu respuesta. Si tu caso esta resuelto, no hace falta que continúes. Si necesitas ayuda en el futuro, escribinos de nuevo."]
+            return []
         # Si dice pendiente, ir directo a preguntas
         d["menu_current_question"] = 0
         _set_stage(conv, "menu_q1")
