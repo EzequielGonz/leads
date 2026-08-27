@@ -971,58 +971,33 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                             except Exception as e:
                                 _log.error("BOT_HANDLE_ERROR phone=%s text=%r err=%s", phone_e164, inbound_text, e)
                                 replies = []
-                            # Collect replies to send AFTER releasing the lock
                             for body in replies:
-                                pending_replies.append({
-                                    "lead": lead,
-                                    "phone_raw": raw_from,
-                                    "phone_e164": phone_e164,
-                                    "body": body,
-                                })
+                                try:
+                                    send_text_message(phone_e164, body)
+                                    status = "accepted"
+                                    error_message = ""
+                                except Exception as exc:
+                                    status = "failed"
+                                    error_message = str(exc)
+                                _append_message_record(
+                                    store,
+                                    _build_outbound_record(
+                                        lead=lead,
+                                        campaign_id=None,
+                                        phone_raw=raw_from,
+                                        phone_e164=phone_e164,
+                                        message_type="text",
+                                        preview=body,
+                                        status=status,
+                                        error_message=error_message,
+                                    ),
+                                )
                                 results["bot_replies_sent"] = results.get("bot_replies_sent", 0) + 1
-                            # Check if case was completed and needs professional notification
-                            if conv and conv.pop("_notify_professionals", False):
-                                notify_convs.append({"conv": dict(conv), "config": dict(bot_cfg)})
 
         _record_event(store, "webhook_received", results)
         return results
 
-    pending_replies = []
-    notify_convs = []  # conversations that need professional notification
-    result = _mutate_store(_apply)
-
-    # Send bot replies OUTSIDE the lock to avoid blocking
-    for item in pending_replies:
-        try:
-            send_text_message(item["phone_e164"], item["body"])
-            status = "accepted"
-            error_message = ""
-        except Exception as exc:
-            status = "failed"
-            error_message = str(exc)
-        _mutate_store(lambda s, _item=item, _st=status, _em=error_message: _append_message_record(
-            s,
-            _build_outbound_record(
-                lead=_item["lead"],
-                campaign_id=None,
-                phone_raw=_item["phone_raw"],
-                phone_e164=_item["phone_e164"],
-                message_type="text",
-                preview=_item["body"],
-                status=_st,
-                error_message=_em,
-            ),
-        ))
-
-    # Send professional notifications OUTSIDE the lock
-    for conv_data in notify_convs:
-        try:
-            from services.bot_service import notify_professionals
-            notify_professionals(conv_data["conv"], conv_data["config"])
-        except Exception as e:
-            _log.error("NOTIFY_PROFESSIONALS_ERROR err=%s", e)
-
-    return result
+    return _mutate_store(_apply)
 
 
 def _bot_status_from_store(store):
