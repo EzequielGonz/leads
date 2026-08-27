@@ -916,54 +916,36 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                         if msg_id and _is_duplicate_msg(msg_id):
                             continue
 
-                        # If conversation is already closed:
-                        # - menu_completado: NEVER reopen (case is finalized for professionals)
-                        # - Other reasons: reopen if it's a real new user action
-                        if conv and conv.get("closed"):
-                            if conv.get("close_reason") == "menu_completado":
-                                continue  # Form completed, case is finalized
-                            if not menu_cfg.get("enabled"):
-                                continue
-                            if raw_msg_type not in ("button", "text", "interactive"):
-                                continue
-                            # Time-based safety: if closed < 10s ago, skip (likely retry)
-                            closed_at = conv.get("closed_at") or ""
-                            if closed_at:
-                                try:
-                                    closed_dt = datetime.fromisoformat(closed_at.replace("Z", "+00:00"))
-                                    now_dt = datetime.now(timezone.utc)
-                                    if (now_dt - closed_dt).total_seconds() < 10:
-                                        continue
-                                except Exception:
-                                    pass
-                            # Real new user action — reopen
-                            conv["closed"] = False
-                            conv["stage"] = "menu_awaiting_choice"
-                            conv["close_reason"] = None
-                            conv.setdefault("data", {})["menu_current_question"] = 0
-                            conv["updated_at"] = _utc_now()
+                        # ALWAYS ensure conversation exists when menu is active
+                        # If text mentions 'pendiente', reset conversation to start fresh
+                        if menu_cfg.get("enabled"):
+                            t_lower = (inbound_text or "").lower()
+                            is_pendiente = "pendiente" in t_lower or "mi caso" in t_lower
 
-                        # Create new conversation when bot+menu is active and none exists
-                        if menu_cfg.get("enabled") and not conv:
-                            conv = bot_ensure_conversation(
-                                store,
-                                phone_e164=phone_e164,
-                                phone_raw=raw_from,
-                                lead_id=lead.get("id") if lead else None,
-                                lead_name=lead.get("full_name") or (lead.get("name") if lead else None) or contact.get("profile", {}).get("name") or "",
-                            )
-                            conv["stage"] = "menu_awaiting_choice"
-                            conv.setdefault("data", {})["menu_current_question"] = 0
-                            # Save lead location info for 'Casos a Derivar'
-                            if lead:
-                                ld = lead.get("data", lead) or {}
-                                barrio = ld.get("barrio") or ""
-                                ubicacion = ld.get("ubicacion") or ""
-                                if barrio:
-                                    conv.setdefault("data", {})["barrio"] = barrio
-                                if ubicacion:
-                                    conv.setdefault("data", {})["ubicacion"] = ubicacion
-                            conv["updated_at"] = _utc_now()
+                            if is_pendiente or not conv or conv.get("closed") and conv.get("close_reason") != "menu_completado":
+                                # Create or reset conversation
+                                if not conv:
+                                    conv = bot_ensure_conversation(
+                                        store,
+                                        phone_e164=phone_e164,
+                                        phone_raw=raw_from,
+                                        lead_id=lead.get("id") if lead else None,
+                                        lead_name=lead.get("full_name") or (lead.get("name") if lead else None) or contact.get("profile", {}).get("name") or "",
+                                    )
+                                    if lead:
+                                        ld = lead.get("data", lead) or {}
+                                        if ld.get("barrio"):
+                                            conv.setdefault("data", {})["barrio"] = ld["barrio"]
+                                        if ld.get("ubicacion"):
+                                            conv.setdefault("data", {})["ubicacion"] = ld["ubicacion"]
+                                else:
+                                    # Reset existing conversation
+                                    conv["closed"] = False
+                                    conv["close_reason"] = None
+
+                                conv["stage"] = "menu_awaiting_choice"
+                                conv.setdefault("data", {})["menu_current_question"] = 0
+                                conv["updated_at"] = _utc_now()
 
                         if conv and not conv.get("closed"):
                             try:
