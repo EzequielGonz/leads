@@ -916,8 +916,14 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                         if msg_id and _is_duplicate_msg(msg_id):
                             continue
 
-                        # If conversation is already closed (bot finished), don't restart
-                        if conv and conv.get("closed"):
+                        # If conversation is already closed, reopen it when menu is active
+                        if conv and conv.get("closed") and menu_cfg.get("enabled"):
+                            conv["closed"] = False
+                            conv["stage"] = "menu_q1"
+                            conv["close_reason"] = None
+                            conv.setdefault("data", {})["menu_current_question"] = 0
+                            conv["updated_at"] = _utc_now()
+                        elif conv and conv.get("closed"):
                             continue
 
                         # Create new conversation when bot+menu is active and none exists
