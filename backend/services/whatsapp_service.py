@@ -916,14 +916,17 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                         if msg_id and _is_duplicate_msg(msg_id):
                             continue
 
-                        # If conversation is already closed, reopen for NEW messages only
-                        # Skip status messages and webhook retries (same msg ID = dedup above)
+                        # If conversation is already closed:
+                        # - menu_completado: NEVER reopen (case is finalized for professionals)
+                        # - Other reasons: reopen if it's a real new user action
                         if conv and conv.get("closed"):
+                            if conv.get("close_reason") == "menu_completado":
+                                continue  # Form completed, case is finalized
                             if not menu_cfg.get("enabled"):
                                 continue
                             if raw_msg_type not in ("button", "text", "interactive"):
                                 continue
-                            # Time-based safety: if conversation closed < 10s ago, skip (likely retry)
+                            # Time-based safety: if closed < 10s ago, skip (likely retry)
                             closed_at = conv.get("closed_at") or ""
                             if closed_at:
                                 try:
@@ -933,7 +936,7 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                                         continue
                                 except Exception:
                                     pass
-                            # It's a real new user action — reopen
+                            # Real new user action — reopen
                             conv["closed"] = False
                             conv["stage"] = "menu_awaiting_choice"
                             conv["close_reason"] = None

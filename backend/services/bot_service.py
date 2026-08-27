@@ -842,6 +842,8 @@ def _public_conversation(conv):
             "menu_lugar_label": data.get("menu_lugar_label") or data.get("menu_lugar") or "",
             "menu_horario": data.get("menu_horario") or "",
             "menu_lesion": data.get("menu_lesion") or "",
+            "barrio": data.get("barrio") or "",
+            "ubicacion": data.get("ubicacion") or "",
         },
     }
 
