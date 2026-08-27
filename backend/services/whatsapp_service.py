@@ -916,19 +916,29 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                         if msg_id and _is_duplicate_msg(msg_id):
                             continue
 
-                        # If conversation is already closed, only reopen if NOT completed
-                        # (menu_completado = form finished; don't reopen on webhook retries)
+                        # If conversation is already closed, reopen for NEW messages only
+                        # Skip status messages and webhook retries (same msg ID = dedup above)
                         if conv and conv.get("closed"):
-                            if conv.get("close_reason") == "menu_completado":
-                                continue  # Form was completed, don't reopen
-                            elif menu_cfg.get("enabled"):
-                                conv["closed"] = False
-                                conv["stage"] = "menu_awaiting_choice"
-                                conv["close_reason"] = None
-                                conv.setdefault("data", {})["menu_current_question"] = 0
-                                conv["updated_at"] = _utc_now()
-                            else:
+                            if not menu_cfg.get("enabled"):
                                 continue
+                            if raw_msg_type not in ("button", "text", "interactive"):
+                                continue
+                            # Time-based safety: if conversation closed < 10s ago, skip (likely retry)
+                            closed_at = conv.get("closed_at") or ""
+                            if closed_at:
+                                try:
+                                    closed_dt = datetime.fromisoformat(closed_at.replace("Z", "+00:00"))
+                                    now_dt = datetime.now(timezone.utc)
+                                    if (now_dt - closed_dt).total_seconds() < 10:
+                                        continue
+                                except Exception:
+                                    pass
+                            # It's a real new user action — reopen
+                            conv["closed"] = False
+                            conv["stage"] = "menu_awaiting_choice"
+                            conv["close_reason"] = None
+                            conv.setdefault("data", {})["menu_current_question"] = 0
+                            conv["updated_at"] = _utc_now()
 
                         # Create new conversation when bot+menu is active and none exists
                         if menu_cfg.get("enabled") and not conv:
