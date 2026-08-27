@@ -159,6 +159,60 @@ def _build_menu_q4(questions):
     return f"{q['question']}"
 
 
+
+
+# ---------------------------------------------------------------------------
+# Notificación a profesionales cuando se completa un caso
+# ---------------------------------------------------------------------------
+
+# Números de los profesionales que reciben notificación
+PROFESSIONAL_PHONES = [
+    "5492235223906",
+    "54911393435473",
+]
+
+
+def _build_case_summary_for_professionals(conv, config):
+    """Construye el resumen del caso para enviar a los profesionales."""
+    data = conv.get("data") or {}
+    nombre = conv.get("lead_name") or "Sin nombre"
+    telefono = conv.get("phone_raw") or conv.get("phone_e164") or ""
+    barrio = data.get("barrio") or "No especificado"
+    localidad = data.get("ubicacion") or data.get("localidad") or "No especificado"
+    antiguedad = data.get("menu_antiguedad_label") or data.get("menu_antiguedad") or "No respondido"
+    lugar = data.get("menu_lugar_label") or data.get("menu_lugar") or "No respondido"
+    horario = data.get("menu_horario") or "No respondido"
+    lesion = data.get("menu_lesion") or "No respondido"
+    
+    summary = chr(128203) + " *NUEVO CASO A DERIVAR*" + chr(10) + chr(10)
+    summary += chr(128100) + " *Nombre:* " + nombre + chr(10)
+    summary += chr(128241) + " *Telefono:* " + telefono + chr(10)
+    summary += chr(127969) + " *Barrio:* " + barrio + chr(10)
+    summary += chr(128205) + " *Localidad:* " + localidad + chr(10) + chr(10)
+    summary += chr(128221) + " *Respuestas del formulario:*" + chr(10)
+    summary += "   " + chr(9200) + " Antiguedad: " + antiguedad + chr(10)
+    summary += "   " + chr(128205) + " Lugar del accidente: " + lugar + chr(10)
+    summary += "   " + chr(128197) + " Horario disponible: " + horario + chr(10)
+    summary += "   " + chr(129658) + " Lesion: " + lesion + chr(10) + chr(10)
+    summary += "---" + chr(10)
+    summary += "Este caso requiere atencion profesional."
+    return summary
+
+def notify_professionals(conv, config):
+    """Envia notificacion del caso completo a los profesionales."""
+    try:
+        from services.whatsapp_service import send_text_message
+        summary = _build_case_summary_for_professionals(conv, config)
+        
+        for phone in PROFESSIONAL_PHONES:
+            try:
+                send_text_message(phone, summary)
+            except Exception as e:
+                print(f"[BOT] Error notificando a profesional {phone}: {e}")
+    except Exception as e:
+        print(f"[BOT] Error en notificacion a profesionales: {e}")
+
+
 def _build_menu_completion(conv, config):
     """Construye el mensaje de cierre después de completar todas las preguntas."""
     nombre = conv.get("lead_name") or ""
@@ -1287,6 +1341,11 @@ def _handle_menu_flow(conv, text, config, lead, menu_config):
         if next_idx >= len(questions):
             # Todas las preguntas respondidas -> cierre
             _finalize(conv, "menu_completado")
+            # Notificar a profesionales del caso nuevo
+            try:
+                notify_professionals(conv, config)
+            except Exception as e:
+                print(f"[BOT] Error notificando profesionales: {e}")
             return [_build_menu_completion(conv, config)]
 
         # Enviar siguiente pregunta
