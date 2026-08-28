@@ -20,7 +20,6 @@ from services.bot_service import (
     list_bot_conversations as bot_list_conversations,
     bot_stats as bot_stats,
     run_due_followups as bot_due_followups,
-    _build_menu_initial_message,
 )
 from services.database import save_whatsapp_store, load_whatsapp_store
 
@@ -916,49 +915,64 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                         if msg_id and _is_duplicate_msg(msg_id):
                             continue
 
-                        # ALWAYS ensure conversation exists when menu is active
-                        # If text mentions 'pendiente', reset conversation to start fresh
+                        # --- LÓGICA SIMPLE DEL BOT ---
                         if menu_cfg.get("enabled"):
                             t_lower = (inbound_text or "").lower()
+
+                            # 1) "Mi caso está pendiente" → crear/reiniciar conversación
                             is_pendiente = "pendiente" in t_lower or "mi caso" in t_lower
-
-                            if is_pendiente or not conv or conv.get("closed") and conv.get("close_reason") != "menu_completado":
-                                # Create or reset conversation
-                                if not conv:
-                                    conv = bot_ensure_conversation(
-                                        store,
-                                        phone_e164=phone_e164,
-                                        phone_raw=raw_from,
-                                        lead_id=lead.get("id") if lead else None,
-                                        lead_name=lead.get("full_name") or (lead.get("name") if lead else None) or contact.get("profile", {}).get("name") or "",
-                                    )
-                                    if lead:
-                                        ld = lead.get("data", lead) or {}
-                                        if ld.get("barrio"):
-                                            conv.setdefault("data", {})["barrio"] = ld["barrio"]
-                                        if ld.get("ubicacion"):
-                                            conv.setdefault("data", {})["ubicacion"] = ld["ubicacion"]
-                                else:
-                                    # Reset existing conversation
-                                    conv["closed"] = False
-                                    conv["close_reason"] = None
-
+                            if is_pendiente:
+                                # Siempre crear nueva conversación para pendiente
+                                conv = bot_ensure_conversation(
+                                    store,
+                                    phone_e164=phone_e164,
+                                    phone_raw=raw_from,
+                                    lead_id=lead.get("id") if lead else None,
+                                    lead_name=lead.get("full_name") or (lead.get("name") if lead else None) or contact.get("profile", {}).get("name") or "",
+                                )
+                                # Guardar barrio y ubicacion del lead
+                                if lead:
+                                    ld = lead.get("data", lead) or {}
+                                    if ld.get("barrio"):
+                                        conv.setdefault("data", {})["barrio"] = ld["barrio"]
+                                    if ld.get("ubicacion"):
+                                        conv.setdefault("data", {})["ubicacion"] = ld["ubicacion"]
+                                conv["closed"] = False
+                                conv["close_reason"] = ""
                                 conv["stage"] = "menu_awaiting_choice"
-                                conv.setdefault("data", {})["menu_current_question"] = 0
                                 conv["updated_at"] = _utc_now()
 
+                            # 2) "Mi caso ya está resuelto" → cerrar sin enviar nada
+                            elif "resuelto" in t_lower or t_lower.strip() == "1":
+                                if conv:
+                                    conv["closed"] = True
+                                    conv["close_reason"] = "resuelto"
+                                    conv["closed_at"] = _utc_now()
+                                    conv["updated_at"] = _utc_now()
+                                # NO enviar respuesta
+                                continue
+
+                            # 3) Si no hay conversación y no es pendiente/resuelto → ignorar
+                            elif not conv:
+                                continue
+
+                            # 4) Si la conversación está cerrada → ignorar
+                            elif conv.get("closed"):
+                                continue
+
+                        # --- ENVIAR RESPUESTAS DEL BOT ---
                         if conv and not conv.get("closed"):
-                            # SAFETY: Only send bot replies if phone exists in leads DB
-                            # This prevents sending messages to random/test numbers
+                            # SEGURIDAD: Solo responder si el lead existe en la DB
                             if not lead and not (conv.get("lead_id") or ""):
-                                _log.warning("BOT_SKIP_NO_LEAD phone=%s - not in leads DB", phone_e164)
+                                _log.warning("BOT_SKIP_NO_LEAD phone=%s", phone_e164)
+                                continue
+
+                            try:
+                                replies = bot_handle_inbound(conv, inbound_text, bot_cfg, lead or None)
+                            except Exception as e:
+                                _log.error("BOT_HANDLE_ERROR phone=%s err=%s", phone_e164, e)
                                 replies = []
-                            else:
-                                try:
-                                    replies = bot_handle_inbound(conv, inbound_text, bot_cfg, lead or None)
-                                except Exception as e:
-                                    _log.error("BOT_HANDLE_ERROR phone=%s text=%r err=%s", phone_e164, inbound_text, e)
-                                    replies = []
+
                             for body in replies:
                                 try:
                                     send_text_message(phone_e164, body)

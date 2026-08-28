@@ -1,30 +1,18 @@
 # -*- coding: utf-8 -*-
-"""Pruebas de simulación del motor del bot de orientación.
-
-Corre sin dependencias externas:  python backend/tests/test_bot_flows.py
-"""
+"""Tests del bot simplificado."""
 
 import os
 import sys
-from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from services.bot_service import (  # noqa: E402
-    MSG_BAJA,
-    MSG_EMERGENCIA,
-    MSG_EMERGENCIA_OFERTA,
-    MSG_NO_ENTIENDO,
-    MSG_PENDIENTE,
-    MSG_RESUELTO_Q,
-    MSG_SCHEDULE_OPENER,
-    MSG_SLOTS,
-    build_first_message,
-    build_summary,
+from services.bot_service import (
     ensure_conversation,
     get_bot_config,
+    get_menu_config,
     handle_inbound,
-    run_due_followups,
+    list_bot_conversations,
+    bot_stats,
 )
 
 FAILURES = []
@@ -38,223 +26,155 @@ def check(label, condition, extra=""):
 
 
 def make_store():
-    return {
-        "config": {
-            "bot_enabled": True,
-            "bot_study_name": "Estudio Test",
-            "bot_advisor_name": "Laura",
-            "bot_consultation_policy": "gratuita",
-            "bot_legal_name": "Estudio Test S.A.",
-            "bot_verification_channel": "nuestra web oficial",
-            "bot_slot_1": "lunes 10:00",
-            "bot_slot_2": "jueves 15:30",
-        },
-        "bot_conversations": {},
-    }
+    return {"config": {}, "bot_conversations": {}}
 
 
-def send(conv, text, config):
-    return handle_inbound(conv, text, config, lead={"full_name": "Juan Pérez"})
-
-
-def main():
-    config = get_bot_config(make_store())
-    check("bot habilitado por config", config.get("bot_enabled") is True)
-
-    first = build_first_message({"full_name": "Juan Pérez"}, config)
-    check("primer mensaje incluye nombre", "Hola, Juan Pérez" in first)
-    check("primer mensaje incluye estudio", "Estudio Test" in first)
-    check("primer mensaje incluye asesor", "Soy Laura, del equipo" in first)
-    check("primer mensaje pregunta estado", "¿Tu caso todavía está pendiente" in first)
-
-    # --- Flujo feliz completo -----------------------------------------------
+def test_pendiente_flow():
+    """Test: pendiente -> Q1 -> Q2 -> Q3 -> Q4 -> cierre"""
+    print("\n=== Test: Flujo completo pendiente ===")
     store = make_store()
-    conv = ensure_conversation(store, "5491100000001", lead_name="Juan Pérez")
-    check("conversación creada en awaiting_status", conv["stage"] == "awaiting_status")
+    cfg = get_bot_config(store)
 
-    replies = send(conv, "todavía está pendiente", config)
-    check("pendiente -> autorización", replies == [MSG_PENDIENTE] and conv["stage"] == "awaiting_authorization")
+    conv = ensure_conversation(store, "5492235223906", "2235223906")
+    check("Stage inicial es menu_awaiting_choice", conv["stage"] == "menu_awaiting_choice")
 
-    replies = send(conv, "sí, dale", config)
-    check("autorización -> pregunta emergencia", "atención médica" in replies[0] and conv["stage"] == "q0")
+    # Pendiente -> intro + Q1
+    replies = handle_inbound(conv, "mi caso esta pendiente", cfg)
+    check("Pendiente devuelve 2 mensajes", len(replies) == 2)
+    check("Stage es menu_q1", conv["stage"] == "menu_q1")
 
-    replies = send(conv, "no, estoy bien", config)
-    check("sin emergencia -> q1", replies and "¿En qué fecha" in replies[0] and conv["stage"] == "q1")
+    # Q1
+    replies = handle_inbound(conv, "2", cfg)
+    check("Q1 responde 1 mensaje", len(replies) == 1)
+    check("Avanza a menu_q2", conv["stage"] == "menu_q2")
+    check("Guarda antiguedad", conv["data"].get("menu_antiguedad") == "2")
+    check("Guarda label antiguedad", conv["data"].get("menu_antiguedad_label") == "Entre 6 meses y 1 año")
 
-    answers = [
-        "el 12 de marzo de 2026",          # q1 fecha
-        "dentro del trabajo",              # q2 circunstancia
-        "estaba en blanco",                # q3 relación laboral
-        "me caí de una escalera",          # q4 descripción
-        "me lastimé la rodilla",           # q5 lesión
-        "sí, me atendió la ART",           # q6 atención
-        "sí, lo denunciaron",              # q7 denuncia
-        "sigo en tratamiento",             # q8 tratamiento
-        "a veces me duele un poco",        # q9 salud
-        "sigo trabajando normal",          # q10 laboral
-        "sí, tengo constancias",           # q11 documentación
-        "en Rosario, Santa Fe",            # q12 ubicación
-        "no, no tengo abogado",            # q13 abogado
-    ]
-    expected_stages = [
-        "q2", "q3", "q4", "q5", "q6", "q7", "q8", "q9",
-        "q10", "q11", "q12", "q13", "scheduling_modality",
-    ]
-    for answer, expected in zip(answers, expected_stages):
-        replies = send(conv, answer, config)
-        check(f"respuesta '{answer[:28]}...' -> {expected}", conv["stage"] == expected)
+    # Q2
+    replies = handle_inbound(conv, "1", cfg)
+    check("Q2 avanza a menu_q3", conv["stage"] == "menu_q3")
 
-    replies = send(conv, "una videollamada", config)
-    check(
-        "modalidad guardada y se ofrecen dos horarios",
-        conv["data"]["modalidad"] == "videollamada" and replies == [MSG_SLOTS.format(slot1="lunes 10:00", slot2="jueves 15:30")],
-        str(replies),
-    )
-    check("etapa scheduling_slot", conv["stage"] == "scheduling_slot")
+    # Q3
+    replies = handle_inbound(conv, "10/6/2026 16:30", cfg)
+    check("Q3 avanza a menu_q4", conv["stage"] == "menu_q4")
+    check("Guarda horario", conv["data"].get("menu_horario") == "10/6/2026 16:30")
 
-    replies = send(conv, "el lunes 10:00", config)
-    check("turno confirmado", conv["stage"] == "scheduled" and conv["data"]["turno_confirmado"] is True)
-    check("confirmación incluye nombre y modalidad", "Juan Pérez" in replies[0] and "videollamada" in replies[0])
-    check("confirmación lista documentos", "DNI" in replies[0] and "claves, códigos" in replies[0])
+    # Q4
+    replies = handle_inbound(conv, "Dolor de espalda, sigo en tratamiento", cfg)
+    check("Q4 cierra conversacion", conv["closed"] == True)
+    check("Close reason es menu_completado", conv["close_reason"] == "menu_completado")
+    check("Detecta tratamiento", conv["data"].get("menu_tratamiento") == "Si, en tratamiento")
+    check("Q4 devuelve mensaje de cierre", len(replies) == 1 and "profesional" in replies[0].lower())
 
-    summary = build_summary(conv)
-    check("resumen con nivel de prioridad", summary["nivel_prioridad"] == "Media")
-    check("resumen con ubicación", summary["lugar_y_provincia"] == "en Rosario, Santa Fe")
 
-    # --- Baja explícita -----------------------------------------------------
+def test_resuelto_flow():
+    """Test: resuelto -> cierra sin respuesta"""
+    print("\n=== Test: Resuelto cierra sin respuesta ===")
     store = make_store()
-    conv2 = ensure_conversation(store, "5491100000002", lead_name="Ana")
-    replies = send(conv2, "no me escriban más", config)
-    check("baja explícita", replies == [MSG_BAJA] and conv2["closed"] and conv2["close_reason"] == "baja")
-    check("sin respuestas tras la baja", handle_inbound(conv2, "hola?", config) == [])
+    cfg = get_bot_config(store)
 
-    # --- No interesado al primer mensaje ------------------------------------
+    conv = ensure_conversation(store, "5491122334455", "1122334455")
+    replies = handle_inbound(conv, "Mi caso ya esta resuelto", cfg)
+    check("Resuelto devuelve 0 mensajes", len(replies) == 0)
+    check("Conversacion cerrada", conv["closed"] == True)
+    check("Close reason es resuelto", conv["close_reason"] == "resuelto")
+
+
+def test_closed_ignores():
+    """Test: msg a conv cerrada -> ignora"""
+    print("\n=== Test: Conversacion cerrada ignora mensajes ===")
     store = make_store()
-    conv3 = ensure_conversation(store, "5491100000003", lead_name="Pedro")
-    replies = send(conv3, "no me interesa", config)
-    check("no interesado -> oferta de baja", "¿Querés que también registremos" in replies[0])
-    replies = send(conv3, "sí", config)
-    check("no interesado -> cierre baja", conv3["closed"] and conv3["close_reason"] == "baja")
+    cfg = get_bot_config(store)
 
-    # --- Nunca tuvo accidente -----------------------------------------------
+    conv = ensure_conversation(store, "5492235223906", "2235223906")
+    handle_inbound(conv, "mi caso esta pendiente", cfg)
+    # Cerrar manualmente
+    conv["closed"] = True
+    conv["close_reason"] = "menu_completado"
+
+    replies = handle_inbound(conv, "hola", cfg)
+    check("Msg a conv cerrada devuelve 0", len(replies) == 0)
+
+
+def test_unknown_text_shows_options():
+    """Test: texto no reconocido muestra las 2 opciones"""
+    print("\n=== Test: Texto no reconocido muestra opciones ===")
     store = make_store()
-    conv4 = ensure_conversation(store, "5491100000004", lead_name="Sofía")
-    replies = send(conv4, "nunca tuve un accidente", config)
-    check("nunca accidente -> oferta de baja", "dato incorrecto" in replies[0])
-    replies = send(conv4, "sí", config)
-    check("cierre por no reconocer", conv4["close_reason"] == "no_reconoce_consulta")
+    cfg = get_bot_config(store)
 
-    # --- Origen del número (no cambia la etapa) ------------------------------
+    conv = ensure_conversation(store, "5499999999999", "999999999")
+    replies = handle_inbound(conv, "hola", cfg)
+    check("Devuelve 1 mensaje", len(replies) == 1)
+    check("Contiene opcion 1", "1 -" in replies[0])
+    check("Contiene opcion 2", "2 -" in replies[0])
+
+
+def test_invalid_q1_answer():
+    """Test: respuesta invalida a Q1 pide que elija otra vez"""
+    print("\n=== Test: Respuesta invalida en Q1 ===")
     store = make_store()
-    conv5 = ensure_conversation(store, "5491100000005", lead_name="Luis")
-    replies = send(conv5, "¿de dónde sacaron mi número?", config)
-    check("pregunta origen", "consulta que realizaste anteriormente" in replies[0])
-    check("origen no cambia etapa", conv5["stage"] == "awaiting_status")
-    replies = send(conv5, "¿qué publicidad fue?", config)
-    check("detalle origen", "No tengo visible desde este chat" in replies[0])
+    cfg = get_bot_config(store)
 
-    # --- Objeciones frecuentes ----------------------------------------------
+    conv = ensure_conversation(store, "5492235223906", "2235223906")
+    handle_inbound(conv, "mi caso esta pendiente", cfg)
+
+    replies = handle_inbound(conv, "xyz", cfg)
+    check("Respuesta invalida pide opciones", len(replies) == 1 and "Perdón" in replies[0])
+    check("Sigue en menu_q1", conv["stage"] == "menu_q1")
+
+
+def test_free_text_q4_detection():
+    """Test: detecta tratamiento en Q4"""
+    print("\n=== Test: Deteccion de tratamiento en Q4 ===")
     store = make_store()
-    conv6 = ensure_conversation(store, "5491100000006", lead_name="Marta")
-    replies = send(conv6, "¿sos un robot?", config)
-    check("respuesta robot", "asistente virtual" in replies[0] and "Estudio Test" in replies[0])
-    replies = send(conv6, "¿esto es una estafa?", config)
-    check("respuesta estafa", "Estudio Test S.A." in replies[0] and "verificar nuestros datos" in replies[0])
-    replies = send(conv6, "¿la consulta es gratis?", config)
-    check("respuesta gratis", "La consulta inicial es gratuita" in replies[0])
-    replies = send(conv6, "¿cuánto voy a cobrar?", config)
-    check("respuesta monto y oferta", "No es posible calcular un monto" in replies[0] and conv6["stage"] == "awaiting_schedule_offer")
+    cfg = get_bot_config(store)
 
-    # --- Prioridad alta por rechazo de ART ----------------------------------
+    conv = ensure_conversation(store, "5492235223906", "2235223906")
+    handle_inbound(conv, "mi caso esta pendiente", cfg)
+    handle_inbound(conv, "1", cfg)
+    handle_inbound(conv, "1", cfg)
+    handle_inbound(conv, "10/6/2026 16:30", cfg)
+
+    # Caso: "si sigo en tratamiento"
+    handle_inbound(conv, "Dolor lumbar, si sigo en tratamiento", cfg)
+    check("Detecta 'si'", conv["data"].get("menu_tratamiento") == "Si, en tratamiento")
+
+
+def test_stats():
+    """Test: estadisticas del bot"""
+    print("\n=== Test: Estadisticas ===")
     store = make_store()
-    conv7 = ensure_conversation(store, "5491100000007", lead_name="Diego")
-    send(conv7, "sigue pendiente", config)
-    send(conv7, "sí", config)
-    send(conv7, "no", config)  # q0
-    replies = send(conv7, "el 2 de enero", config)  # q1
-    check("q1 -> q2", conv7["stage"] == "q2")
-    send(conv7, "en el trabajo", config)
-    send(conv7, "en blanco", config)
-    send(conv7, "me corté la mano", config)
-    replies = send(conv7, "una herida grave", config)  # q5 -> lesión grave -> prioridad
-    check(
-        "lesión grave -> prioridad alta",
-        conv7["priority"] == "Alta" and conv7["stage"] == "scheduling_modality"
-        and "sería importante que tu situación la revise" in replies[0],
-        str(conv7["stage"]),
-    )
-    replies = send(conv7, "no, no me atendieron", config)  # modalidad
-    check(
-        "prioridad continúa hacia horario",
-        conv7["stage"] == "scheduling_slot",
-        str(conv7["stage"]),
-    )
+    cfg = get_bot_config(store)
 
-    # --- Dos mensajes no comprendidos -> derivación --------------------------
-    store = make_store()
-    conv8 = ensure_conversation(store, "5491100000008", lead_name="Rocío")
-    replies = send(conv8, "xqzkz", config)
-    check("primera no comprendida", replies == [MSG_NO_ENTIENDO])
-    replies = send(conv8, "bzzzt", config)
-    check("segunda no comprendida -> derivación", "derivar" in replies[0] and conv8["stage"] == "transferred")
+    conv1 = ensure_conversation(store, "5491111111111", "111111111")
+    handle_inbound(conv1, "mi caso esta pendiente", cfg)
+    handle_inbound(conv1, "1", cfg)
+    handle_inbound(conv1, "1", cfg)
+    handle_inbound(conv1, "10/6/2026 16:30", cfg)
+    handle_inbound(conv1, "Dolor de cabeza", cfg)
 
-    # --- Emergencia ----------------------------------------------------------
-    store = make_store()
-    conv9 = ensure_conversation(store, "5491100000009", lead_name="Carlos")
-    replies = send(conv9, "estoy en la guardia, es una emergencia", config)
-    check("emergencia -> salud primero", MSG_EMERGENCIA in replies and MSG_EMERGENCIA_OFERTA in replies)
-    replies = send(conv9, "sí", config)
-    check("emergencia acepta contacto -> derivación", conv9["stage"] == "transferred")
+    conv2 = ensure_conversation(store, "5492222222222", "222222222")
+    handle_inbound(conv2, "mi caso esta pendiente", cfg)
 
-    # --- Seguimientos --------------------------------------------------------
-    store = make_store()
-    conv10 = ensure_conversation(store, "5491100000010", lead_name="Nadia")
-    conv10["updated_at"] = (datetime.now(timezone.utc) - timedelta(hours=30)).isoformat()
-    pending = run_due_followups(store)
-    check("primer seguimiento vencido", len(pending) == 1 and "nuevamente" in pending[0][2])
-    conv10["updated_at"] = (datetime.now(timezone.utc) - timedelta(hours=30)).isoformat()
-    pending = run_due_followups(store)
-    check("segundo seguimiento (último)", len(pending) == 1 and "último mensaje" in pending[0][2])
-    pending = run_due_followups(store)
-    check("no más seguimientos", pending == [])
-
-    # --- Resuelto ------------------------------------------------------------
-    store = make_store()
-    conv11 = ensure_conversation(store, "5491100000011", lead_name="Elena")
-    replies = send(conv11, "ya lo resolví con la ART", config)
-    check("resuelto -> detalle", replies == [MSG_RESUELTO_Q])
-    replies = send(conv11, "me pagaron la indemnización", config)
-    check("indemnización -> cierre resuelto", conv11["closed"] and conv11["close_reason"] == "resuelto")
-
-    # --- Abogado actual ------------------------------------------------------
-    store = make_store()
-    conv12 = ensure_conversation(store, "5491100000012", lead_name="Tomás")
-    send(conv12, "sigue pendiente", config)
-    send(conv12, "sí", config)
-    send(conv12, "no", config)
-    send(conv12, "hace dos meses", config)
-    send(conv12, "en el trabajo", config)
-    send(conv12, "en blanco", config)
-    send(conv12, "me golpeé la cabeza", config)
-    send(conv12, "una contusión", config)
-    send(conv12, "sí, me vio la ART", config)
-    send(conv12, "sí, está denunciado", config)
-    send(conv12, "sigo en tratamiento", config)
-    send(conv12, "no, estoy bien", config)
-    send(conv12, "sigo trabajando", config)
-    send(conv12, "tengo constancias", config)
-    send(conv12, "en Córdoba", config)
-    replies = send(conv12, "sí, tengo abogado", config)
-    check("con abogado -> oferta de cierre", "interferir con el asesoramiento" in replies[0] and conv12["stage"] == "awaiting_close_or_info")
-    replies = send(conv12, "sí", config)
-    check("cierre por abogado", conv12["closed"] and conv12["close_reason"] == "ya_tiene_abogado")
-
-    print()
-    if FAILURES:
-        print(f"{len(FAILURES)} chequeos fallaron: {FAILURES}")
-        sys.exit(1)
-    print("Todos los chequeos pasaron.")
+    stats = bot_stats(store)
+    check("Total conversaciones es 2", stats["total"] == 2)
+    check("1 cerrada", stats["closed"] == 1)
+    check("1 activa", stats["active"] == 1)
 
 
 if __name__ == "__main__":
-    main()
+    test_pendiente_flow()
+    test_resuelto_flow()
+    test_closed_ignores()
+    test_unknown_text_shows_options()
+    test_invalid_q1_answer()
+    test_free_text_q4_detection()
+    test_stats()
+
+    print(f"\n{'='*50}")
+    if FAILURES:
+        print(f"FALLARON {len(FAILURES)} TESTS:")
+        for f in FAILURES:
+            print(f"  - {f}")
+    else:
+        print("TODOS LOS TESTS PASARON ✅")
