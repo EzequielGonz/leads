@@ -810,6 +810,10 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
         "bot_replies_sent": 0,
     }
 
+    # Shared mutable list accessible by _apply closure AND code outside the lock
+    _pending_replies = []
+    _pending_notify = [None, None]  # [conv, config] or [None, None]
+
     def _apply(store):
         entries = payload.get("entry") or []
         for entry in entries:
@@ -918,11 +922,11 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                         # --- LÓGICA SIMPLE DEL BOT ---
                         if menu_cfg.get("enabled"):
                             t_lower = (inbound_text or "").lower()
+                            current_stage = (conv.get("stage") or "") if conv else ""
 
                             # 1) "Mi caso está pendiente" → crear/reiniciar conversación
                             is_pendiente = "pendiente" in t_lower or "mi caso" in t_lower
                             if is_pendiente:
-                                # Siempre crear nueva conversación para pendiente
                                 conv = bot_ensure_conversation(
                                     store,
                                     phone_e164=phone_e164,
@@ -930,7 +934,6 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                                     lead_id=lead.get("id") if lead else None,
                                     lead_name=lead.get("full_name") or (lead.get("name") if lead else None) or contact.get("profile", {}).get("name") or "",
                                 )
-                                # Guardar barrio y ubicacion del lead
                                 if lead:
                                     ld = lead.get("data", lead) or {}
                                     if ld.get("barrio"):
@@ -942,14 +945,13 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                                 conv["stage"] = "menu_awaiting_choice"
                                 conv["updated_at"] = _utc_now()
 
-                            # 2) "Mi caso ya está resuelto" → cerrar sin enviar nada
-                            elif "resuelto" in t_lower or t_lower.strip() == "1":
+                            # 2) "Mi caso ya está resuelto" → cerrar SIN enviar nada
+                            elif "resuelto" in t_lower:
                                 if conv:
                                     conv["closed"] = True
                                     conv["close_reason"] = "resuelto"
                                     conv["closed_at"] = _utc_now()
                                     conv["updated_at"] = _utc_now()
-                                # NO enviar respuesta
                                 continue
 
                             # 3) Si no hay conversación y no es pendiente/resuelto → ignorar
@@ -960,9 +962,8 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                             elif conv.get("closed"):
                                 continue
 
-                        # --- ENVIAR RESPUESTAS DEL BOT ---
+                        # --- PROCESAR RESPUESTA DEL BOT (sin enviar nada todavía) ---
                         if conv and not conv.get("closed"):
-                            # SEGURIDAD: Solo responder si el lead existe en la DB
                             if not lead and not (conv.get("lead_id") or ""):
                                 _log.warning("BOT_SKIP_NO_LEAD phone=%s", phone_e164)
                                 continue
@@ -974,32 +975,65 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                                 replies = []
 
                             for body in replies:
-                                try:
-                                    send_text_message(phone_e164, body)
-                                    status = "accepted"
-                                    error_message = ""
-                                except Exception as exc:
-                                    status = "failed"
-                                    error_message = str(exc)
-                                _append_message_record(
-                                    store,
-                                    _build_outbound_record(
-                                        lead=lead,
-                                        campaign_id=None,
-                                        phone_raw=raw_from,
-                                        phone_e164=phone_e164,
-                                        message_type="text",
-                                        preview=body,
-                                        status=status,
-                                        error_message=error_message,
-                                    ),
-                                )
-                                results["bot_replies_sent"] = results.get("bot_replies_sent", 0) + 1
+                                _pending_replies.append({
+                                    "phone": phone_e164,
+                                    "phone_raw": raw_from,
+                                    "body": body,
+                                    "lead": lead,
+                                })
+                            results["bot_replies_sent"] += len(replies)
+
+                            # Check if case completed -> need to notify professionals
+                            if conv.get("closed") and conv.get("close_reason") == "menu_completado":
+                                _pending_notify[0] = conv
+                                _pending_notify[1] = bot_cfg
 
         _record_event(store, "webhook_received", results)
         return results
 
-    return _mutate_store(_apply)
+    result = _mutate_store(_apply)
+
+    # --- SEND REPLIES OUTSIDE THE LOCK (avoids deadlock with batch sender) ---
+    for reply_info in _pending_replies:
+        try:
+            send_text_message(reply_info["phone"], reply_info["body"])
+            reply_status = "accepted"
+            reply_error = ""
+        except Exception as exc:
+            reply_status = "failed"
+            reply_error = str(exc)
+        # Record outbound message
+        try:
+            _rec = reply_info
+            _rec_status = reply_status
+            _rec_error = reply_error
+            def _record_reply(s, ri=_rec, rs=_rec_status, re=_rec_error):
+                _append_message_record(
+                    s,
+                    _build_outbound_record(
+                        lead=ri["lead"],
+                        campaign_id=None,
+                        phone_raw=ri["phone_raw"],
+                        phone_e164=ri["phone"],
+                        message_type="text",
+                        preview=ri["body"],
+                        status=rs,
+                        error_message=re,
+                    ),
+                )
+            _mutate_store(_record_reply)
+        except Exception as e:
+            _log.error("BOT_REPLY_RECORD_ERROR: %s", e)
+
+    # --- NOTIFY PROFESSIONALS OUTSIDE THE LOCK ---
+    if _pending_notify[0] and _pending_notify[1]:
+        try:
+            from services.bot_service import notify_professionals as _notify_profs
+            _notify_profs(_pending_notify[0], _pending_notify[1])
+        except Exception as e:
+            _log.error("NOTIFY_PROFESSIONALS_ERROR: %s", e)
+
+    return result
 
 
 def _bot_status_from_store(store):
