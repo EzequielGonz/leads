@@ -11,6 +11,7 @@ from urllib import request as urllib_request
 
 from services.bot_service import (
     DEFAULT_BOT_CONFIG,
+    _normalize as _bot_normalize,
     build_first_message,
     ensure_conversation as bot_ensure_conversation,
     get_bot_config as bot_get_config,
@@ -478,7 +479,8 @@ def _build_outbound_record(
     }
 
 
-def send_text_message(to_phone, body, preview_url=False):
+def send_text_message(to_phone, body, preview_url=False, _retries=3):
+    """Envía un mensaje de texto con reintentos automáticos (spec: retry ante fallos de Meta API)."""
     config = _ensure_configured()
     normalized = normalize_phone_for_whatsapp(to_phone)
     if not normalized:
@@ -496,12 +498,23 @@ def send_text_message(to_phone, body, preview_url=False):
             "body": body,
         },
     }
-    return _perform_request(
-        "POST",
-        _graph_url(config, f"{config['phone_number_id']}/messages"),
-        config["access_token"],
-        payload,
-    )
+    last_error = None
+    for attempt in range(_retries):
+        try:
+            return _perform_request(
+                "POST",
+                _graph_url(config, f"{config['phone_number_id']}/messages"),
+                config["access_token"],
+                payload,
+            )
+        except WhatsAppServiceError as exc:
+            last_error = exc
+            if attempt < _retries - 1:
+                # Backoff: 1s, 2s, 4s
+                wait = 2 ** attempt
+                time.sleep(wait)
+                continue
+    raise last_error
 
 
 def send_template_message(to_phone, template_name, language_code, body_variables=None):
@@ -921,7 +934,7 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
 
                         # --- LÓGICA SIMPLE DEL BOT ---
                         if menu_cfg.get("enabled"):
-                            t_lower = (inbound_text or "").lower()
+                            t_lower = _bot_normalize(inbound_text or "")
                             current_stage = (conv.get("stage") or "") if conv else ""
 
                             # 1) "Mi caso está pendiente" → crear/reiniciar conversación
@@ -945,14 +958,19 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
                                 conv["stage"] = "menu_awaiting_choice"
                                 conv["updated_at"] = _utc_now()
 
-                            # 2) "Mi caso ya está resuelto" → cerrar SIN enviar nada
+                            # 2) "Mi caso ya está resuelto" → dejar que bot_handle_inbound lo procese
+                            #    (retorna mensaje de agradecimiento + cierre)
                             elif "resuelto" in t_lower:
-                                if conv:
-                                    conv["closed"] = True
-                                    conv["close_reason"] = "resuelto"
-                                    conv["closed_at"] = _utc_now()
-                                    conv["updated_at"] = _utc_now()
-                                continue
+                                if not conv:
+                                    conv = bot_ensure_conversation(
+                                        store,
+                                        phone_e164=phone_e164,
+                                        phone_raw=raw_from,
+                                        lead_id=lead.get("id") if lead else None,
+                                        lead_name=lead.get("full_name") or "",
+                                    )
+                                conv["stage"] = "menu_awaiting_choice"
+                                conv["updated_at"] = _utc_now()
 
                             # 3) Si no hay conversación y no es pendiente/resuelto → ignorar
                             elif not conv:

@@ -1,10 +1,18 @@
 # -*- coding: utf-8 -*-
-"""Bot de orientación por accidentes laborales - Versión simplificada.
+"""Bot de orientación por accidentes laborales - Versión completa.
 
-Flujo:
+Flujo (máquina de estados):
   1. Template con 2 botones: "Mi caso ya esta resuelto" / "Mi caso esta pendiente"
-  2. "Resuelto" → cierra conversación, sin respuesta
-  3. "Pendiente" → 4 preguntas → cierre con notificación a profesionales
+  2. "Resuelto" → mensaje de agradecimiento y cierre
+  3. "Pendiente" → intro + 4 preguntas → cierre con notificación a profesionales
+
+Estados:
+  menu_awaiting_choice  → Esperando que el cliente elija resuelto/pendiente
+  menu_q1               → Pregunta 1: Antigüedad del caso
+  menu_q2               → Pregunta 2: Lugar del accidente
+  menu_q3               → Pregunta 3: Horario de consulta (validación regex)
+  menu_q4               → Pregunta 4: Lesión / tratamiento (texto libre)
+  menu_closed           → Conversación finalizada
 """
 
 import os
@@ -16,6 +24,23 @@ from datetime import datetime, timezone
 
 def _utc_now():
     return datetime.now(timezone.utc).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Normalización de texto (requerimiento del spec)
+# ---------------------------------------------------------------------------
+
+def _strip_accents(text):
+    """Quita tildes/acentos de un string. Ej: 'está' -> 'esta'."""
+    if not text:
+        return ""
+    nfkd = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in nfkd if not unicodedata.combining(c))
+
+
+def _normalize(text):
+    """Normaliza texto: quita tildes, pasa a minúsculas, trim."""
+    return _strip_accents(str(text or "")).strip().lower()
 
 
 # ---------------------------------------------------------------------------
@@ -52,17 +77,37 @@ DEFAULT_MENU_QUESTIONS = [
     },
     {
         "id": "horario",
-        "question": "📋 Pregunta 3: 📅 ¿Qué día y horario te quedaría cómodo para una consulta con un profesional?\n\nLa consulta tiene el fin de analizar con más detalle tu caso y poder brindarte el mejor asesoramiento integral.\nLa consulta no tiene costo y es completamente sin compromiso.\nTrabajamos de lunes a viernes de 9 a 18hs.\n\n(Por favor, escribir tu respuesta en el siguiente formato: 10/5/2026 17:30hs)",
+        "question": (
+            "📋 Pregunta 3: 📅 ¿Qué día y horario te quedaría cómodo para una consulta "
+            "con un profesional?\n\nLa consulta tiene el fin de analizar con más detalle "
+            "tu caso y poder brindarte el mejor asesoramiento integral.\n"
+            "La consulta no tiene costo y es completamente sin compromiso.\n"
+            "Trabajamos de lunes a viernes de 9 a 18hs.\n\n"
+            "(Por favor, escribir tu respuesta en el siguiente formato: 10/5/2026 17:30hs)"
+        ),
         "options": [],
-        "free_text": True
+        "free_text": True,
+        "validate_regex": r"^\d{1,2}\/\d{1,2}\/\d{4}\s\d{1,2}:\d{2}(hs)?$",
+        "validation_hint": (
+            "Por favor escribí la fecha y hora en este formato:\n"
+            "10/5/2026 17:30hs\n\n"
+            "Trabajamos de lunes a viernes de 9 a 18hs."
+        ),
     },
     {
         "id": "lesion",
-        "question": "📋 Pregunta 4: 🩺 ¿Qué lesión o problema de salud te generó el accidente laboral?\n\n¿Seguís en tratamiento?\n\n(Escribí tu respuesta)",
+        "question": (
+            "📋 Pregunta 4: 🩺 ¿Qué lesión o problema de salud te generó el "
+            "accidente laboral?\n\n¿Seguís en tratamiento?\n\n"
+            "(Escribí tu respuesta)"
+        ),
         "options": [],
         "free_text": True
     }
 ]
+
+# Regex para validar formato de horario
+HORARIO_REGEX = re.compile(r"^\d{1,2}\/\d{1,2}\/\d{4}\s\d{1,2}:\d{2}(hs)?$")
 
 
 def get_menu_config(config):
@@ -79,17 +124,27 @@ def get_menu_config(config):
 
 
 # ---------------------------------------------------------------------------
-# Números de profesionales para notificación
+# Números de profesionales para notificación (variables de entorno)
 # ---------------------------------------------------------------------------
 
-PROFESSIONAL_PHONES = [
-    "5492235223906",
-    "54911393435473",
-]
+def _get_professional_phones():
+    """Lee los números de notificación de variables de entorno."""
+    phones = []
+    for i in range(1, 6):
+        phone = os.environ.get(f"NOTIFY_NUMBER_{i}", "").strip()
+        if phone:
+            phones.append(phone)
+    # Fallback si no hay variables de entorno configuradas
+    if not phones:
+        phones = [
+            "5492235223906",
+            "54911393435473",
+        ]
+    return phones
 
 
 def _build_case_summary(conv, config):
-    """Arma el resumen del caso para los profesionales."""
+    """Arma el resumen del caso para los profesionales (formato del spec)."""
     data = conv.get("data") or {}
     nombre = conv.get("lead_name") or "Sin nombre"
     telefono = conv.get("phone_raw") or conv.get("phone_e164") or ""
@@ -101,20 +156,24 @@ def _build_case_summary(conv, config):
     lesion = data.get("menu_lesion") or ""
     tratamiento = data.get("menu_tratamiento") or ""
 
+    # Combinar lesión y tratamiento en un solo campo
+    lesion_tratamiento = lesion
+    if tratamiento:
+        lesion_tratamiento = f"{lesion} | Tratamiento: {tratamiento}"
+
     lines = [
-        "📋 *NUEVO CASO A DERIVAR*",
+        "📋 *NUEVO CASO A DERIVAR – VITA*",
         "",
         f"👤 *Nombre:* {nombre}",
-        f"📱 *Telefono:* {telefono}",
+        f"📞 *Teléfono:* {telefono}",
         f"📍 *Barrio:* {barrio}",
-        f"📍 *Localidad:* {localidad}",
+        f"🏙️ *Localidad:* {localidad}",
+        f"⏳ *Antigüedad:* {antiguedad}",
+        f"⚠️ *Lugar del accidente:* {lugar}",
+        f"🗓️ *Consulta solicitada:* {horario}",
+        f"🩺 *Lesión / tratamiento:* {lesion_tratamiento}",
         "",
-        "📝 *Respuestas del formulario:*",
-        f"   ⏰ Antiguedad: {antiguedad}",
-        f"   📍 Lugar del accidente: {lugar}",
-        f"   📅 Horario disponible: {horario}",
-        f"   🩺 Lesion: {lesion}",
-        f"   🩺 Tratamiento: {tratamiento}",
+        "👨‍💼 *Asesor asignado:* Leonardo",
         "",
         "---",
         "Este caso requiere atención profesional.",
@@ -123,11 +182,12 @@ def _build_case_summary(conv, config):
 
 
 def notify_professionals(conv, config):
-    """Envía resumen del caso a los profesionales."""
+    """Envía resumen del caso a los profesionales configurados."""
     try:
         from services.whatsapp_service import send_text_message
         summary = _build_case_summary(conv, config)
-        for phone in PROFESSIONAL_PHONES:
+        phones = _get_professional_phones()
+        for phone in phones:
             try:
                 send_text_message(phone, summary)
             except Exception as e:
@@ -141,7 +201,7 @@ def notify_professionals(conv, config):
 # ---------------------------------------------------------------------------
 
 def get_bot_config(store=None):
-    """Lee la config del bot."""
+    """Lee la config del bot desde el store."""
     stored = (store or {}).get("config") or {}
     cfg = {}
     for key, default in DEFAULT_BOT_CONFIG.items():
@@ -179,7 +239,7 @@ def ensure_conversation(store, phone_e164, phone_raw="", lead_id=None, lead_name
 
 
 def get_bot_conversation(store, phone_e164):
-    """Busca una conversación."""
+    """Busca una conversación por número."""
     return (store.get("bot_conversations") or {}).get(phone_e164)
 
 
@@ -251,7 +311,7 @@ def run_due_followups(store):
 # ---------------------------------------------------------------------------
 
 def _finalize(conv, reason):
-    """Cierra la conversación."""
+    """Cierra la conversación y guarda el resumen."""
     conv["closed"] = True
     conv["close_reason"] = reason
     conv["closed_at"] = _utc_now()
@@ -280,9 +340,26 @@ def _build_question(questions, index):
     lines = [q["question"]]
     for opt in q.get("options", []):
         lines.append(f"   {opt['value']} - {opt['label']}")
-    if q.get("free_text"):
-        lines.append("\n(Escribí tu respuesta)")
+    if q.get("free_text") and not q.get("options"):
+        # Solo agregar "(Escribí tu respuesta)" si la pregunta NO tiene opciones
+        pass
     return "\n".join(lines)
+
+
+def _validate_free_text(question, text):
+    """Valida respuesta de texto libre (horario con regex, lesión que no vacío)."""
+    # Si la pregunta tiene regex de validación, usarla
+    pattern = question.get("validate_regex")
+    if pattern:
+        if not re.match(pattern, text.strip()):
+            hint = question.get("validation_hint", "Formato inválido. Por favor seguí el formato indicado.")
+            return False, hint
+
+    # Verificar que no esté vacío
+    if not text.strip():
+        return False, "Por favor escribí tu respuesta."
+
+    return True, ""
 
 
 def handle_inbound(conv, raw_text, config, lead=None):
@@ -309,8 +386,8 @@ def handle_inbound(conv, raw_text, config, lead=None):
     menu_cfg = get_menu_config(config)
     questions = menu_cfg["questions"]
 
-    # --- Normalizar texto del botón ---
-    text_lower = text.lower()
+    # Normalizar texto (quitar tildes + minúsculas) para comparaciones
+    text_normalized = _normalize(text)
     menu_stages = ["menu_q1", "menu_q2", "menu_q3", "menu_q4"]
 
     # --- PRIMERO: si estamos en una pregunta del menú, procesar respuesta ---
@@ -318,12 +395,17 @@ def handle_inbound(conv, raw_text, config, lead=None):
         idx = menu_stages.index(stage)
         current_q = questions[idx]
 
-        # Validar respuesta si tiene opciones
+        # Validar respuesta si tiene opciones (Q1, Q2)
         if current_q.get("options"):
             valid_values = [opt["value"] for opt in current_q["options"]]
             if text.strip() not in valid_values:
-                options_text = "\n".join([f"   {opt['value']} - {opt['label']}" for opt in current_q["options"]])
-                return [f"Perdón, no entendí. Por favor elegí una de estas opciones:\n\n{options_text}"]
+                options_text = "\n".join([
+                    f"   {opt['value']} - {opt['label']}"
+                    for opt in current_q["options"]
+                ])
+                return [
+                    f"Perdón, no entendí. Por favor elegí una de estas opciones:\n\n{options_text}"
+                ]
             # Guardar valor y label
             d[f"menu_{current_q['id']}"] = text.strip()
             for opt in current_q["options"]:
@@ -331,14 +413,23 @@ def handle_inbound(conv, raw_text, config, lead=None):
                     d[f"menu_{current_q['id']}_label"] = opt["label"]
                     break
         else:
-            # Texto libre
+            # Texto libre (Q3 horario, Q4 lesión)
+            valid, hint = _validate_free_text(current_q, text)
+            if not valid:
+                return [hint]
+
             d[f"menu_{current_q['id']}"] = text.strip()
+
             # Detectar tratamiento en Q4 (lesión)
             if current_q.get("id") == "lesion":
-                t_lower = text.strip().lower()
-                if any(w in t_lower for w in ["si", "sí", "sigo", "tratamiento", "tratandome", "en tratamiento"]):
+                t_normalized = _normalize(text)
+                if any(w in t_normalized for w in [
+                    "si", "sigo", "tratamiento", "tratandome", "en tratamiento"
+                ]):
                     d["menu_tratamiento"] = "Si, en tratamiento"
-                elif any(w in t_lower for w in ["no", "alta", "curado", "ya no", "suspendido"]):
+                elif any(w in t_normalized for w in [
+                    "no", "alta", "curado", "ya no", "suspendido"
+                ]):
                     d["menu_tratamiento"] = "No"
                 else:
                     d["menu_tratamiento"] = text.strip()
@@ -353,22 +444,29 @@ def handle_inbound(conv, raw_text, config, lead=None):
             except Exception as e:
                 print(f"[BOT] Error notificación: {e}")
             nombre = conv.get("lead_name") or ""
-            return [f"Perfecto{', ' + nombre if nombre else ''}. Un profesional se va a estar contactando con vos brevemente."]
+            return [
+                f"Perfecto{', ' + nombre if nombre else ''}. "
+                "Un profesional se va a estar contactando con vos brevemente."
+            ]
 
         # Enviar siguiente pregunta
         conv["stage"] = menu_stages[next_idx]
         conv["updated_at"] = _utc_now()
         return [_build_question(questions, next_idx)]
 
-    # --- DESPUÉS: solo en menu_awaiting_choice, detectar botones ---
+    # --- DESPUÉS: solo en menu_awaiting_choice, detectar botones/texto ---
     if stage == "menu_awaiting_choice":
-        # "Ya está resuelto" → cerrar sin respuesta
-        if "resuelto" in text_lower:
+        # "Ya está resuelto" → mensaje de agradecimiento y cierre
+        if "resuelto" in text_normalized:
             _finalize(conv, "resuelto")
-            return []
+            return [
+                "¡Gracias por comunicarte con Estudio VITA! "
+                "Si en el futuro necesitás asesoramiento, no dudes en escribirnos. "
+                "¡Éxitos!"
+            ]
 
         # "Mi caso está pendiente" → iniciar preguntas
-        if "pendiente" in text_lower or "mi caso" in text_lower:
+        if "pendiente" in text_normalized or "mi caso" in text_normalized:
             d["menu_current_question"] = 0
             conv["stage"] = "menu_q1"
             conv["updated_at"] = _utc_now()

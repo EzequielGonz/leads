@@ -1057,8 +1057,40 @@ def whatsapp_batch_cancel():
         return jsonify({"ok": False, "message": "No hay envio en curso"})
 
 
+import hashlib
+import hmac
+
+
+def _verify_webhook_signature(request_obj):
+    """Verifica la firma X-Hub-Signature-256 del webhook de Meta.
+    Retorna True si la firma es válida o si no hay APP_SECRET configurado
+    (modo desarrollo).
+    """
+    app_secret = os.environ.get("APP_SECRET", "").strip()
+    if not app_secret:
+        # Sin APP_SECRET configurado, skip verificación (modo desarrollo)
+        return True
+    signature = request_obj.headers.get("X-Hub-Signature-256", "")
+    if not signature:
+        return False
+    try:
+        expected = "sha256=" + hmac.new(
+            app_secret.encode("utf-8"),
+            request_obj.get_data(),
+            hashlib.sha256
+        ).hexdigest()
+        return hmac.compare_digest(signature, expected)
+    except Exception:
+        return False
+
+
 @app.route("/api/whatsapp/webhook", methods=["POST"])
 def whatsapp_webhook_receive():
+    # Verificar firma de Meta (requerimiento del spec)
+    if not _verify_webhook_signature(request):
+        import logging as _wl
+        _wl.warning("WEBHOOK_SIGNATURE_INVALID: firma X-Hub-Signature-256 inválida")
+        return _make_json_error("Firma inválida", 403)
     try:
         payload = request.get_json(silent=True) or {}
         # Log the raw payload for debugging
