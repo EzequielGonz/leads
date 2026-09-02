@@ -38,6 +38,62 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 _store_lock = threading.Lock()
 
+# --- BLINDAJE CONTRA ENVÍOS MASIVOS NO CONTROLADOS ---
+
+# Kill switch: si KILL_SWITCH=1, el bot NO envía ningún mensaje
+def _kill_switch_active():
+    return os.environ.get("KILL_SWITCH", "0").strip() in ("1", "true", "yes", "on")
+
+# Rate limit global: máximo mensajes salientes por ventana de tiempo
+_rate_limit_window = []  # timestamps de mensajes enviados
+RATE_LIMIT_MAX = int(os.environ.get("RATE_LIMIT_MAX", "20"))  # max msgs per minute
+RATE_LIMIT_WINDOW_SECS = 60  # 1 minuto
+
+def _check_rate_limit():
+    """Verifica si se superó el rate limit global. Retorna True si permitido."""
+    import time
+    now = time.time()
+    # Limpiar mensajes fuera de la ventana
+    while _rate_limit_window and _rate_limit_window[0] < now - RATE_LIMIT_WINDOW_SECS:
+        _rate_limit_window.pop(0)
+    if len(_rate_limit_window) >= RATE_LIMIT_MAX:
+        return False
+    _rate_limit_window.append(now)
+    return True
+
+# Lock por conversación (número de teléfono): evitar procesar 2 eventos del mismo número
+_phone_locks = {}
+_phone_locks_lock = threading.Lock()
+
+def _get_phone_lock(phone_e164):
+    with _phone_locks_lock:
+        if phone_e164 not in _phone_locks:
+            _phone_locks[phone_e164] = threading.Lock()
+        return _phone_locks[phone_e164]
+
+# Límite de mensajes salientes por contacto (por conversación)
+_outbound_counters = {}  # phone_e164 -> count
+MAX_OUTBOUND_PER_CONVERSATION = 8  # template + intro + Q1-Q4 + cierre + notif = max 8
+
+def _check_outbound_limit(phone_e164):
+    """Verifica si se superó el límite de mensajes por contacto."""
+    count = _outbound_counters.get(phone_e164, 0)
+    if count >= MAX_OUTBOUND_PER_CONVERSATION:
+        return False
+    _outbound_counters[phone_e164] = count + 1
+    return True
+
+# Notificaciones ya enviadas (idempotencia)
+_notified_conversations = set()
+_notified_lock = threading.Lock()
+
+def _was_already_notified(conv_id):
+    with _notified_lock:
+        if conv_id in _notified_conversations:
+            return True
+        _notified_conversations.add(conv_id)
+        return False
+
 
 class WhatsAppServiceError(Exception):
     pass
@@ -479,8 +535,23 @@ def _build_outbound_record(
     }
 
 
-def send_text_message(to_phone, body, preview_url=False, _retries=3):
-    """Envía un mensaje de texto con reintentos automáticos (spec: retry ante fallos de Meta API)."""
+def send_text_message(to_phone, body, preview_url=False, _retries=1):
+    """Envía un mensaje de texto con protecciones contra envíos masivos.
+
+    Protecciones:
+    - Kill switch: si KILL_SWITCH=1, no envía nada
+    - Rate limit global: max N mensajes por minuto
+    - Límite por contacto: max 8 mensajes por conversación
+    - Solo 1 reintento (no loop)
+    """
+    # KILL SWITCH: apagar envíos al instante
+    if _kill_switch_active():
+        raise WhatsAppServiceError("KILL_SWITCH activo: envío de mensajes deshabilitado")
+
+    # RATE LIMIT GLOBAL: no superar N mensajes por minuto
+    if not _check_rate_limit():
+        raise WhatsAppServiceError(f"Rate limit: max {RATE_LIMIT_MAX} mensajes por minuto")
+
     config = _ensure_configured()
     normalized = normalize_phone_for_whatsapp(to_phone)
     if not normalized:
@@ -1011,10 +1082,19 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
 
     result = _mutate_store(_apply)
 
-    # --- SEND REPLIES OUTSIDE THE LOCK (avoids deadlock with batch sender) ---
+    # --- SEND REPLIES WITH PROTECTIONS (phone lock, outbound limit, rate limit) ---
     for reply_info in _pending_replies:
+        phone_key = reply_info["phone"]
+        phone_lock = _get_phone_lock(phone_key)
+        if not phone_lock.acquire(blocking=False):
+            _log.warning("BOT_PHONE_LOCKED phone=%s - already being processed", phone_key)
+            continue
         try:
-            send_text_message(reply_info["phone"], reply_info["body"])
+            # Verificar límite de mensajes por contacto
+            if not _check_outbound_limit(phone_key):
+                _log.warning("BOT_OUTBOUND_LIMIT phone=%s - max %d msgs", phone_key, MAX_OUTBOUND_PER_CONVERSATION)
+                continue
+            send_text_message(phone_key, reply_info["body"])
             reply_status = "accepted"
             reply_error = ""
         except Exception as exc:
@@ -1025,7 +1105,7 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
             _rec = reply_info
             _rec_status = reply_status
             _rec_error = reply_error
-            def _record_reply(s, ri=_rec, rs=_rec_status, re=_rec_error):
+            def _record_reply(s, ri=_rec, rs=_rec_status, re=_rec_error, _pk=phone_key, _pl=phone_lock):
                 _append_message_record(
                     s,
                     _build_outbound_record(
@@ -1042,14 +1122,24 @@ def process_webhook(payload, leads=None, find_lead_fn=None):
             _mutate_store(_record_reply)
         except Exception as e:
             _log.error("BOT_REPLY_RECORD_ERROR: %s", e)
+        finally:
+            try:
+                phone_lock.release()
+            except Exception:
+                pass
 
-    # --- NOTIFY PROFESSIONALS OUTSIDE THE LOCK ---
+    # --- NOTIFY PROFESSIONALS OUTSIDE THE LOCK (with idempotency) ---
     if _pending_notify[0] and _pending_notify[1]:
-        try:
-            from services.bot_service import notify_professionals as _notify_profs
-            _notify_profs(_pending_notify[0], _pending_notify[1])
-        except Exception as e:
-            _log.error("NOTIFY_PROFESSIONALS_ERROR: %s", e)
+        # IDEMPOTENCIA: no notificar el mismo caso dos veces
+        conv_id = _pending_notify[0].get("id") or ""
+        if conv_id and _was_already_notified(conv_id):
+            _log.warning("NOTIFY_ALREADY_SENT conv=%s - skipping", conv_id)
+        elif conv_id:
+            try:
+                from services.bot_service import notify_professionals as _notify_profs
+                _notify_profs(_pending_notify[0], _pending_notify[1])
+            except Exception as e:
+                _log.error("NOTIFY_PROFESSIONALS_ERROR: %s", e)
 
     return result
 

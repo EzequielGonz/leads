@@ -1086,31 +1086,40 @@ def _verify_webhook_signature(request_obj):
 
 @app.route("/api/whatsapp/webhook", methods=["POST"])
 def whatsapp_webhook_receive():
-    # Verificar firma de Meta (requerimiento del spec)
+    """Webhook de WhatsApp. Responde 200 INMEDIATAMENTE y procesa en background.
+
+    CRITICO: Si el procesamiento tarda mas de 5 segundos, Meta reintenta el
+    webhook, lo que causa mensajes duplicados. Por eso ACK inmediato.
+    """
+    # Verificar firma de Meta
     if not _verify_webhook_signature(request):
         import logging as _wl
-        _wl.warning("WEBHOOK_SIGNATURE_INVALID: firma X-Hub-Signature-256 inválida")
-        return _make_json_error("Firma inválida", 403)
-    try:
-        payload = request.get_json(silent=True) or {}
-        # Log the raw payload for debugging
-        import logging as _wl
-        entries = payload.get("entry", [])
-        for entry in entries:
-            for change in entry.get("changes", []):
-                val = change.get("value", {})
-                for msg in val.get("messages", []):
-                    _wl.warning("WEBHOOK_RAW type=%s from=%s keys=%s", msg.get("type"), msg.get("from"), list(msg.keys()))
-                    if msg.get("type") == "interactive":
-                        _wl.warning("WEBHOOK_INTERACTIVE %s", msg.get("interactive"))
-                    elif msg.get("type") == "button":
-                        _wl.warning("WEBHOOK_BUTTON %s", msg.get("button"))
-        result = process_webhook(payload, [], find_lead_fn=find_lead_by_phone_fast)
-        return jsonify({"received": True, **result})
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return _make_json_error(f"Error procesando webhook: {str(e)}", 500)
+        _wl.warning("WEBHOOK_SIGNATURE_INVALID")
+        return _make_json_error("Firma invalida", 403)
+
+    # Leer el payload UNA vez
+    payload = request.get_json(silent=True) or {}
+
+    # Log basico
+    import logging as _wl
+    for entry in payload.get("entry", []):
+        for change in entry.get("changes", []):
+            val = change.get("value", {})
+            for msg in val.get("messages", []):
+                _wl.warning("WEBHOOK_RAW type=%s from=%s", msg.get("type"), msg.get("from"))
+
+    # --- ACK INMEDIATO: responder 200 ANTES de procesar nada ---
+    # Esto evita que Meta reintente el webhook (causa #1 de mensajes duplicados)
+    import threading
+    def _process_in_background():
+        try:
+            process_webhook(payload, [], find_lead_fn=find_lead_by_phone_fast)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+
+    threading.Thread(target=_process_in_background, daemon=True).start()
+    return jsonify({"received": True})
 
 
 @app.route("/api/batch/start", methods=["POST"])
